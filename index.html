@@ -261,6 +261,7 @@ async function tryGateSubmit(){
 
 const SHEET_ID = '1oWF0WMkGAXHBrZ0l52qDJZHWuLHRMx-Yg0lk3BiuW-c';
 const SHEET_NAME = 'Order';
+const SHEETS_API_KEY = 'AIzaSyBmjLOVmy_cRcrN8t_KqDi7txrNpaN8zOw';
 const OVERLAY_KEY = 'shptrack_overlay_v1';
 
 const CARRIERS = [
@@ -290,7 +291,6 @@ const CARRIERS = [
 
 const STATUS_OPTIONS = ['targeted', 'opened', 'shipped', 'closed'];
 
-let sheetCols = {};
 let allRows = [];
 let overlay = loadOverlay();
 
@@ -309,24 +309,11 @@ function toast(msg){
   toast._t = setTimeout(()=>t.classList.remove('show'), 2600);
 }
 
-function loadSheetJSONP(sheetId, sheetName){
-  return new Promise((resolve, reject)=>{
-    const cbName = 'gvizCb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
-    window[cbName] = (resp)=>{ cleanup(); resolve(resp); };
-    const script = document.createElement('script');
-    script.src = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json;responseHandler:${cbName}&sheet=${encodeURIComponent(sheetName)}&t=${Date.now()}`;
-    script.onerror = ()=>{ cleanup(); reject(new Error('Không tải được dữ liệu (sheet có thể chưa được chia sẻ công khai, hoặc lỗi mạng)')); };
-    function cleanup(){ delete window[cbName]; script.remove(); }
-    document.body.appendChild(script);
-    setTimeout(()=>{ if(window[cbName]){ cleanup(); reject(new Error('Quá thời gian tải dữ liệu')); } }, 15000);
-  });
-}
-
-function parseGvizDate(v){
-  if(v == null) return null;
-  const m = /^Date\((\d+),(\d+),(\d+)/.exec(v);
+function parseUSDate(s){
+  if(!s) return null;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s).trim());
   if(!m) return null;
-  return new Date(+m[1], +m[2], +m[3]);
+  return new Date(+m[3], +m[1]-1, +m[2]);
 }
 function fmtDate(d){
   if(!d) return '';
@@ -347,12 +334,20 @@ function parseDateInputValue(s){
 async function loadData(){
   document.getElementById('subtitle').textContent = 'Đang tải dữ liệu…';
   try{
-    const resp = await loadSheetJSONP(SHEET_ID, SHEET_NAME);
-    if(resp.status !== 'ok') throw new Error('Google Sheets trả về lỗi khi đọc tab "Order"');
-    const cols = resp.table.cols;
-    sheetCols = {};
-    cols.forEach((c,i)=>{ sheetCols[c.id] = i; });
-    allRows = resp.table.rows.map((row, idx)=>buildRow(row, idx));
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}?key=${SHEETS_API_KEY}`;
+    const res = await fetch(url);
+    if(!res.ok){
+      const errBody = await res.json().catch(()=>null);
+      throw new Error(errBody?.error?.message || `Lỗi HTTP ${res.status} khi gọi Google Sheets API`);
+    }
+    const data = await res.json();
+    const rows = data.values || [];
+    if(!rows.length) throw new Error('Google Sheets API trả về dữ liệu rỗng cho tab "Order"');
+    const header = rows[0];
+    const colIndex = {};
+    header.forEach((h,i)=>{ colIndex[String(h).trim()] = i; });
+    const dataRows = rows.slice(1);
+    allRows = dataRows.map((row, idx)=>buildRow(row, idx, colIndex));
     document.getElementById('subtitle').textContent =
       `Đã tải ${allRows.length} đơn hàng · cập nhật lúc ${new Date().toLocaleTimeString('vi-VN')}`;
     renderForSelectedMonth();
@@ -366,31 +361,18 @@ async function loadData(){
   }
 }
 
-function cell(row, letter){
-  const i = sheetCols[letter];
-  if(i == null) return null;
-  return row.c[i] || null;
-}
-
-function buildRow(row, idx){
-  const get = letter => cell(row, letter);
-  const soCell = get('D');
-  const so = soCell && soCell.v != null ? String(soCell.v).trim() : '';
-  const clientCell = get('B');
-  const countryCell = get('C');
-  const fobCell = get('F');
-  const realLoadCell = get('L');
-  const etdCell = get('M');
-  const etaCell = get('N');
-  const statusCell = get('Q');
-  const monthCell = get('R');
-  const bookingCell = get('W');
-  const lineCell = get('X');
-
-  const realLoadDate = realLoadCell ? parseGvizDate(realLoadCell.v) : null;
-  const etdDate = etdCell ? parseGvizDate(etdCell.v) : null;
-  const etaDate = etaCell ? parseGvizDate(etaCell.v) : null;
-  const monthStr = monthCell && monthCell.v ? String(monthCell.v).trim() : '';
+function buildRow(row, idx, colIndex){
+  const get = name => {
+    const i = colIndex[name];
+    if(i == null) return '';
+    const v = row[i];
+    return v == null ? '' : String(v).trim();
+  };
+  const so = get('SO');
+  const realLoadDate = parseUSDate(get('RealLoad'));
+  const etdDate = parseUSDate(get('ETD'));
+  const etaDate = parseUSDate(get('ETA'));
+  const monthStr = get('Month');
 
   let monthKey = '';
   const mm = /^(\d{1,2})\.(\d{4})$/.exec(monthStr);
@@ -400,12 +382,12 @@ function buildRow(row, idx){
     monthKey = `${realLoadDate.getFullYear()}-${String(realLoadDate.getMonth()+1).padStart(2,'0')}`;
   }
 
-  const client = clientCell && clientCell.v != null ? String(clientCell.v).trim() : '';
-  const country = countryCell && countryCell.v != null ? String(countryCell.v).trim() : '';
-  const fobDisplay = fobCell ? (fobCell.f || (fobCell.v != null ? String(fobCell.v) : '')) : '';
-  const status = statusCell && statusCell.v != null ? String(statusCell.v).trim() : '';
-  const sheetBooking = bookingCell && bookingCell.v != null ? String(bookingCell.v).trim() : '';
-  const sheetLine = lineCell && lineCell.v != null ? String(lineCell.v).trim() : '';
+  const client = get('Client');
+  const country = get('Country');
+  const fobDisplay = get('FOB');
+  const status = get('Status');
+  const sheetBooking = get('Booking');
+  const sheetLine = get('Line');
 
   const rowKey = so ? `SO_${so}` : `IDX_${idx}_${client}_${fobDisplay}`;
   const ov = overlay[rowKey] || {};
