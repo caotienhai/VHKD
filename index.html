@@ -665,7 +665,7 @@
           desc: "Theo dõi và cập nhật lịch trình vận chuyển các lô hàng.",
           items: [
             { kind: "tool", title: "Update data lịch trình", desc: "Tự tạo link tra cứu vận đơn tới 18 hãng tàu (Maersk, MSC, CMA CGM...) từ Google Sheet Order.",
-              path: "D:\\Operation\\Claude\\CLAUDE-OUTPUTS\\Shipment Tracking\\index.html" }
+              path: "shipment-tracking.html" }
           ]
         },
         {
@@ -808,7 +808,7 @@
             { kind: "skill", id: "danh-muc-tl", generic: true, title: "Danh mục tài liệu", desc: "Tra cứu danh mục tài liệu đào tạo — chưa có skill riêng, dùng khung yêu cầu chung.",
               template: "{{yeu_cau}}",
               params: [ {key:"yeu_cau", label:"Yêu cầu cụ thể", placeholder:"Liệt kê tài liệu đào tạo về quy trình xuất khẩu", multiline:true} ] },
-            { kind: "skill", id: "slide-karofi", title: "Công cụ Chuẩn hóa slide", desc: "Chuyển bài trình chiếu sang chuẩn thương hiệu Karofi và tự thêm 3 slide câu hỏi ôn tập cuối bài.",
+            { kind: "skill", id: "slide-karofi", title: "Công cụ Chuẩn hoá slide", desc: "Chuyển bài trình chiếu sang chuẩn thương hiệu Karofi và tự thêm 3 slide câu hỏi ôn tập cuối bài.",
               template: "Chuyển slide {{ten_file}} sang chuẩn Karofi và thêm câu hỏi trắc nghiệm cuối bài.",
               params: [ {key:"ten_file", label:"Tên file trình chiếu", placeholder:"Đào tạo sản phẩm mới.pptx"} ] }
           ]
@@ -988,12 +988,13 @@
     actions.className = "card-actions";
 
     var isHttpUrl = !isSkill && /^https?:\/\//i.test(item.path || "");
+    var isAbsoluteWinPath = /^[a-zA-Z]:[\\\/]/.test(item.path || "");
     var isLocalHtml = !isSkill && !isHttpUrl && /\.html?$/i.test(item.path || "");
     var isUrl = isHttpUrl || isLocalHtml;
 
     if (isUrl) {
       var a = document.createElement("a");
-      a.href = isHttpUrl ? item.path : toFileUrl(item.path);
+      a.href = isHttpUrl ? item.path : (isAbsoluteWinPath ? toFileUrl(item.path) : item.path);
       a.target = "_blank"; a.rel = "noopener";
       a.className = "btn btn-link"; a.textContent = "Mở công cụ ↗";
       actions.appendChild(a);
@@ -1018,7 +1019,7 @@
 
     body.appendChild(actions);
 
-    if (isLocalHtml) {
+    if (isLocalHtml && isAbsoluteWinPath) {
       var note = document.createElement("p");
       note.className = "howto";
       note.style.marginTop = "8px";

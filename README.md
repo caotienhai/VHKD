@@ -2,14 +2,21 @@
 
 Dashboard nội bộ cho Phòng Vận hành Kinh doanh (Karofi): liệt kê các nhóm công việc, kỹ năng Cowork và công cụ tự xây bằng Claude Code. Mỗi thẻ có nút "Sử dụng" để nhập tham số và copy câu lệnh tiếng Việt, sẵn sàng dán vào Cowork.
 
-File duy nhất cần thiết là [`index.html`](./index.html) — trang tĩnh, tự chứa (không gọi API/CDN ngoài), chạy được bằng cách mở trực tiếp trong trình duyệt hoặc host qua GitHub Pages.
+File chính là [`index.html`](./index.html) — trang dashboard, tự chứa (không gọi API/CDN ngoài), chạy được bằng cách mở trực tiếp trong trình duyệt hoặc host qua GitHub Pages.
+
+Đi kèm là [`shipment-tracking.html`](./shipment-tracking.html) — công cụ Shipment Tracking (bản đã có Google OAuth để đọc/ghi trực tiếp Google Sheet, lấy từ `CLAUDE-OUTPUTS/Shipment Tracking/github-pages/index.html`). Thẻ **"Update data lịch trình"** trong `index.html` link tới file này bằng đường dẫn tương đối — cả hai file phải nằm cùng thư mục để link hoạt động.
 
 ## ⚠️ Trước khi push lên GitHub
 
-Nội dung `index.html` hiện có nhắc tới **đường dẫn nội bộ** (VD: `D:\Operation\Claude\Projects\Cong-cu-Gia-thanh-BOM\...`) và **ID Google Sheet** dùng cho công cụ Shipment Tracking. Nếu đẩy lên **repo public**, những thông tin này sẽ hiển thị công khai. Khuyến nghị:
+- `index.html` có nhắc tới **đường dẫn nội bộ** (VD: `D:\Operation\Claude\Projects\Cong-cu-Gia-thanh-BOM\...`) cho công cụ tra giá thành BOM (công cụ này chạy cục bộ, không đưa vào repo).
+- `shipment-tracking.html` chứa sẵn **ID Google Sheet**, **Google API key** và **OAuth Client ID** (để đăng nhập ghi dữ liệu). Nếu đẩy lên **repo public**, các giá trị này sẽ hiển thị công khai.
+
+Khuyến nghị:
 
 - Đặt repo ở chế độ **Private** trên GitHub (Settings → repo → Danger Zone, hoặc chọn Private lúc tạo repo), **hoặc**
-- Rà lại `index.html`, thay các đường dẫn/ID nhạy cảm bằng placeholder trước khi để repo public.
+- Rà lại 2 file trên, thay các đường dẫn/ID/key nhạy cảm bằng placeholder trước khi để repo public.
+
+Ngoài ra, OAuth Client ID trong `shipment-tracking.html` chỉ hoạt động với các "Authorized JavaScript origins" đã khai báo trong Google Cloud Console — sau khi có URL GitHub Pages thật (`https://<user>.github.io`), cần vào Google Cloud Console thêm origin đó vào OAuth Client, nếu không nút đăng nhập Google trên trang sẽ báo lỗi.
 
 ## Cách đưa lên GitHub Pages
 
