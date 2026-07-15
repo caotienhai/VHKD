@@ -771,6 +771,15 @@
       desc: "Ứng dụng tự xây bằng Claude Code và các chỉ số theo dõi nội bộ.",
       tasks: [
         {
+          id: "bao-gia-pi",
+          name: "Báo giá PI (Export Ops Hub)",
+          desc: "Web app cho sale lập báo giá PI — đọc trực tiếp Operations2025 + ExportSystem, lưu vào file riêng từng sale.",
+          items: [
+            { kind: "tool", title: "Export Ops Hub — Báo giá PI", desc: "Sale đăng nhập bằng tên + PIN, xem khách của mình, Edit/Clone/tạo đơn mới, tính %LN + CBM + container, tạo máy mới qua BOM Customize.",
+              path: "https://script.google.com/macros/s/AKfycbz7CwVNQ8xd0WXs8pvVuqMLfhSk2NPLkJfqIQwLmR0bknTTFbfx_TXEddWEaGIVmQAt/exec" }
+          ]
+        },
+        {
           id: "gia-ban",
           name: "Kiểm tra giá bán",
           desc: "Công cụ tra giá thành theo BOM.",
