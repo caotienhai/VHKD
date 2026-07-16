@@ -690,8 +690,9 @@ function renderTrackCell(tdTrack, r, opts){
     tdTrack.querySelector('[data-pt="etd"]').onclick = ()=>renderTrackCell(tdTrack, r, {showForm:true});
     tdTrack.querySelector('[data-pt="eta"]').onclick = ()=>renderTrackCell(tdTrack, r, {showForm:true});
   }else{
-    tdTrack.innerHTML = '<span style="color:var(--text-dim);font-size:12px;">—</span>';
+    tdTrack.innerHTML = '<span class="editable" style="font-size:12px;">— chọn ETD/ETA</span>';
     tdTrack.dataset.ok = '0';
+    tdTrack.querySelector('span').onclick = ()=>renderTrackCell(tdTrack, r, {showForm:true});
   }
 
   if(opts.showForm){
