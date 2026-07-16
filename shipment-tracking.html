@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Shipment Tracking</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#f4f6f9; --card:#ffffff; --border:#e2e6ec; --text:#1c2430; --text-dim:#6b7686;
@@ -133,7 +132,10 @@
   .modal-status{font-size:12px;margin-top:8px;min-height:16px;}
   .modal-status.err{color:var(--err);}
   .modal-status.ok{color:var(--ok);}
-  .signin-state{font-size:11.5px;color:var(--text-dim);}
+  .modal-box input[type=password]{
+    width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);
+    border-radius:8px;padding:8px 10px;font-size:13px;margin-top:8px;
+  }
   #gateOverlay{
     position:fixed;inset:0;background:var(--bg);z-index:200;
     display:flex;align-items:center;justify-content:center;padding:20px;
@@ -181,7 +183,7 @@
 
   <div class="note-banner">
     Load date, ETD, ETA và Status có thể sửa trực tiếp trên bảng (bấm vào giá trị để sửa). Nút <b>Tracking</b> mở trang hãng tàu tương ứng kèm sẵn số booking ở tab mới.
-    Mọi chỉnh sửa chỉ lưu cục bộ trên trình duyệt này. Admin bấm <b>Đăng nhập Google (Admin)</b> rồi <b>Update Info</b> để ghi thẳng các thay đổi vào Google Sheet (chỉ ghi đúng ô đã sửa) — không cần qua Cowork nữa, nhưng vẫn có thể dùng "Sao chép" để dán thủ công nếu cần.
+    Mọi chỉnh sửa chỉ lưu cục bộ trên trình duyệt này. Admin bấm <b>Update Info</b>, nhập mã admin rồi bấm "Ghi vào Google Sheet" để ghi thẳng các thay đổi (chỉ ghi đúng ô đã sửa) — không cần qua Cowork nữa, nhưng vẫn có thể dùng "Sao chép" để dán thủ công nếu cần.
   </div>
 
   <div class="card">
@@ -207,11 +209,7 @@
     </div>
     <div class="footer-row">
       <div class="progress" id="progressText"></div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span class="signin-state" id="signinState">Chưa đăng nhập Google</span>
-        <button id="signinBtn" class="btn-icon">Đăng nhập Google (Admin)</button>
-        <button id="updateInfoBtn" class="btn-primary">Update Info</button>
-      </div>
+      <button id="updateInfoBtn" class="btn-primary">Update Info</button>
     </div>
   </div>
 </div>
@@ -220,8 +218,9 @@
 <div class="modal-overlay" id="updateInfoOverlay" style="display:none;">
   <div class="modal-box">
     <h3>Cập nhật vào Google Sheet</h3>
-    <p class="modal-desc">Danh sách thay đổi sắp ghi vào tab "Order" (chỉ đúng các ô đã sửa). Kiểm tra lại rồi bấm "Ghi vào Google Sheet" — cần đăng nhập Google (tài khoản có quyền Editor) trước.</p>
+    <p class="modal-desc">Danh sách thay đổi sắp ghi vào tab "Order" (chỉ đúng các ô đã sửa). Kiểm tra lại, nhập mã admin rồi bấm "Ghi vào Google Sheet".</p>
     <textarea id="updateInfoText" readonly></textarea>
+    <input type="password" id="adminPasscode" placeholder="Mã admin" autocomplete="off">
     <div class="modal-status" id="writeStatus"></div>
     <div class="modal-actions">
       <button id="writeToSheetBtn" class="btn-primary">Ghi vào Google Sheet</button>
@@ -271,14 +270,20 @@ async function tryGateSubmit(){
 })();
 
 const SHEET_ID = '1oWF0WMkGAXHBrZ0l52qDJZHWuLHRMx-Yg0lk3BiuW-c';
-const SHEET_NAME = 'Order';
-const SHEETS_API_KEY = 'AIzaSyBmjLOVmy_cRcrN8t_KqDi7txrNpaN8zOw';
-const OAUTH_CLIENT_ID = '504638976261-94c2ejmj2t2l85ov37kcjjqiku5069jc.apps.googleusercontent.com';
+const GAS_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz7CwVNQ8xd0WXs8pvVuqMLfhSk2NPLkJfqIQwLmR0bknTTFbfx_TXEddWEaGIVmQAt/exec';
 const OVERLAY_KEY = 'shptrack_overlay_v1';
 
-let lastColIndex = {};
-let accessToken = null;
-let tokenClient = null;
+async function gasCall(action, extra){
+  const res = await fetch(GAS_WEBAPP_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify({action, ...(extra||{})}),
+  });
+  if(!res.ok) throw new Error(`Lỗi HTTP ${res.status} khi gọi Apps Script`);
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || 'Apps Script trả về lỗi không rõ.');
+  return json;
+}
 
 const CARRIERS = [
   {name:'Maersk', aliases:['MAERSK','MSK','MAEU'], url:b=>`https://www.maersk.com/tracking/${encodeURIComponent(b)}`},
@@ -350,21 +355,10 @@ function parseDateInputValue(s){
 async function loadData(){
   document.getElementById('subtitle').textContent = 'Đang tải dữ liệu…';
   try{
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}?key=${SHEETS_API_KEY}`;
-    const res = await fetch(url);
-    if(!res.ok){
-      const errBody = await res.json().catch(()=>null);
-      throw new Error(errBody?.error?.message || `Lỗi HTTP ${res.status} khi gọi Google Sheets API`);
-    }
-    const data = await res.json();
-    const rows = data.values || [];
-    if(!rows.length) throw new Error('Google Sheets API trả về dữ liệu rỗng cho tab "Order"');
-    const header = rows[0];
-    const colIndex = {};
-    header.forEach((h,i)=>{ colIndex[String(h).trim()] = i; });
-    lastColIndex = colIndex;
-    const dataRows = rows.slice(1);
-    allRows = dataRows.map((row, idx)=>buildRow(row, idx, colIndex));
+    const json = await gasCall('stGetOrders');
+    const rows = json.rows || [];
+    if(!rows.length) throw new Error('Apps Script trả về dữ liệu rỗng cho tab "Order"');
+    allRows = rows.map((row, idx)=>buildRow(row, idx));
     document.getElementById('subtitle').textContent =
       `Đã tải ${allRows.length} đơn hàng · cập nhật lúc ${new Date().toLocaleTimeString('vi-VN')}`;
     renderForSelectedMonth();
@@ -378,18 +372,12 @@ async function loadData(){
   }
 }
 
-function buildRow(row, idx, colIndex){
-  const get = name => {
-    const i = colIndex[name];
-    if(i == null) return '';
-    const v = row[i];
-    return v == null ? '' : String(v).trim();
-  };
-  const so = get('SO');
-  const realLoadDate = parseUSDate(get('RealLoad'));
-  const etdDate = parseUSDate(get('ETD'));
-  const etaDate = parseUSDate(get('ETA'));
-  const monthStr = get('Month');
+function buildRow(row, idx){
+  const so = (row.so||'').trim();
+  const realLoadDate = parseUSDate(row.realLoad);
+  const etdDate = parseUSDate(row.etd);
+  const etaDate = parseUSDate(row.eta);
+  const monthStr = row.month||'';
 
   let monthKey = '';
   const mm = /^(\d{1,2})\.(\d{4})$/.exec(monthStr);
@@ -399,16 +387,16 @@ function buildRow(row, idx, colIndex){
     monthKey = `${realLoadDate.getFullYear()}-${String(realLoadDate.getMonth()+1).padStart(2,'0')}`;
   }
 
-  const client = get('Client');
-  const country = get('Country');
-  const fobDisplay = get('FOB');
-  const status = get('Status');
-  const sheetBooking = get('Booking');
-  const sheetLine = get('Line');
+  const client = row.client||'';
+  const country = row.country||'';
+  const fobDisplay = row.fob||'';
+  const status = row.status||'';
+  const sheetBooking = row.booking||'';
+  const sheetLine = row.line||'';
 
   const rowKey = so ? `SO_${so}` : `IDX_${idx}_${client}_${fobDisplay}`;
   const ov = overlay[rowKey] || {};
-  const sheetRow = idx + 2;
+  const sheetRow = row.sheetRow;
 
   return {
     idx, rowKey, sheetRow, client, country, fobDisplay, realLoadDate, etdDate, etaDate, monthKey,
@@ -839,76 +827,35 @@ function openTracking(r, tdBooking, tdLine, tdTrack, tdAction){
   refreshProgressCount();
 }
 
-function columnLetter(index){
-  let n = index + 1;
-  let s = '';
-  while(n > 0){
-    const rem = (n - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s;
-}
-
-const FIELD_TO_COLUMN = {
-  booking: 'Booking', line: 'Line', loadDateOverride: 'RealLoad',
-  etdOverride: 'ETD', etaOverride: 'ETA', statusOverride: 'Status',
+const FIELD_TO_GAS = {
+  booking: 'booking', line: 'line', loadDateOverride: 'realLoad',
+  etdOverride: 'etd', etaOverride: 'eta', statusOverride: 'status',
 };
 
-function buildBatchUpdateData(){
+function buildChangesPayload(){
   const monthVal = MONTH_PICKER.value;
   const rows = allRows.filter(r=>r.monthKey === monthVal);
-  const data = [];
+  const changes = [];
   const touchedRowKeys = [];
   rows.forEach(r=>{
     const ov = overlay[r.rowKey];
     if(!ov) return;
     let touched = false;
-    Object.keys(FIELD_TO_COLUMN).forEach(field=>{
+    Object.keys(FIELD_TO_GAS).forEach(field=>{
       const raw = ov[field];
       if(raw == null || raw === '') return;
-      const colName = FIELD_TO_COLUMN[field];
-      const colIdx = lastColIndex[colName];
-      if(colIdx == null) return;
       let value = raw;
       if(field === 'loadDateOverride' || field === 'etdOverride' || field === 'etaOverride'){
         const d = parseDateInputValue(raw);
         if(!d) return;
         value = `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
       }
-      data.push({range: `${SHEET_NAME}!${columnLetter(colIdx)}${r.sheetRow}`, values: [[value]]});
+      changes.push({sheetRow: r.sheetRow, field: FIELD_TO_GAS[field], value});
       touched = true;
     });
     if(touched) touchedRowKeys.push(r.rowKey);
   });
-  return {data, touchedRowKeys};
-}
-
-function setSigninState(text){
-  document.getElementById('signinState').textContent = text;
-}
-
-function ensureTokenClient(){
-  if(tokenClient) return tokenClient;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: OAUTH_CLIENT_ID,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    ux_mode: 'popup',
-    callback: (resp)=>{
-      if(resp.error){
-        setSigninState('Đăng nhập thất bại: ' + resp.error);
-        return;
-      }
-      accessToken = resp.access_token;
-      setSigninState('Đã đăng nhập Google ✓');
-      toast('Đã đăng nhập Google');
-    },
-  });
-  return tokenClient;
-}
-
-function signIn(){
-  ensureTokenClient().requestAccessToken();
+  return {changes, touchedRowKeys};
 }
 
 async function writeChangesToSheet(){
@@ -916,14 +863,15 @@ async function writeChangesToSheet(){
   statusEl.className = 'modal-status';
   statusEl.textContent = '';
 
-  if(!accessToken){
-    statusEl.textContent = 'Chưa đăng nhập Google — vui lòng bấm "Đăng nhập Google (Admin)" trước.';
+  const passcode = document.getElementById('adminPasscode').value.trim();
+  if(!passcode){
+    statusEl.textContent = 'Vui lòng nhập mã admin.';
     statusEl.className = 'modal-status err';
     return;
   }
 
-  const {data, touchedRowKeys} = buildBatchUpdateData();
-  if(!data.length){
+  const {changes, touchedRowKeys} = buildChangesPayload();
+  if(!changes.length){
     statusEl.textContent = 'Không có thay đổi nào để ghi.';
     statusEl.className = 'modal-status err';
     return;
@@ -931,39 +879,17 @@ async function writeChangesToSheet(){
 
   statusEl.textContent = 'Đang ghi vào Google Sheet…';
   try{
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({valueInputOption: 'USER_ENTERED', data}),
-    });
-    if(!res.ok){
-      const errBody = await res.json().catch(()=>null);
-      const msg = errBody?.error?.message || `Lỗi HTTP ${res.status}`;
-      if(res.status === 401){
-        statusEl.textContent = 'Phiên đăng nhập hết hạn — bấm "Đăng nhập Google (Admin)" rồi thử lại.';
-        accessToken = null;
-        setSigninState('Chưa đăng nhập Google');
-      }else if(res.status === 403){
-        statusEl.textContent = 'Tài khoản chưa có quyền Editor trên Google Sheet, hoặc chưa được cấp quyền OAuth. Chi tiết: ' + msg;
-      }else{
-        statusEl.textContent = 'Lỗi khi ghi: ' + msg;
-      }
-      statusEl.className = 'modal-status err';
-      return;
-    }
+    const json = await gasCall('stWriteChanges', {passcode, changes});
     touchedRowKeys.forEach(rk=>{ delete overlay[rk]; });
     saveOverlay();
-    statusEl.textContent = `Đã ghi ${data.length} ô vào Google Sheet.`;
+    document.getElementById('adminPasscode').value = '';
+    statusEl.textContent = `Đã ghi ${json.written} ô vào Google Sheet.`;
     statusEl.className = 'modal-status ok';
     toast('Đã ghi vào Google Sheet');
     await loadData();
     setTimeout(closeUpdateInfoModal, 900);
   }catch(err){
-    statusEl.textContent = 'Lỗi mạng khi ghi: ' + err.message;
+    statusEl.textContent = 'Lỗi khi ghi: ' + err.message;
     statusEl.className = 'modal-status err';
   }
 }
@@ -1027,7 +953,6 @@ function closeUpdateInfoModal(){
 }
 
 document.getElementById('updateInfoBtn').addEventListener('click', updateInfo);
-document.getElementById('signinBtn').addEventListener('click', signIn);
 document.getElementById('writeToSheetBtn').addEventListener('click', writeChangesToSheet);
 document.getElementById('copyUpdateInfoBtn').addEventListener('click', ()=>{
   const text = document.getElementById('updateInfoText').value;
