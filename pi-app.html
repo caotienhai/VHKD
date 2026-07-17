@@ -173,6 +173,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
     </div>
     <div class="topbar-actions">
       <span id="userInfo"></span>
+      <a class="btn ghost" href="https://caotienhai.github.io/VHKD/shipment-tracking.html" target="_blank" rel="noopener" title="Xem lịch trình shipment (chỉ xem — cập nhật cần mã admin)">🚢 Shipment</a>
       <button class="btn ghost" id="refreshBtn" title="Xóa cache, tải lại dữ liệu mới nhất từ Google Sheets">⟳ Làm mới</button>
       <button class="btn ghost" id="logoutBtn">Đăng xuất</button>
     </div>
@@ -231,6 +232,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
           <button class="btn" id="cloneBtn">⧉ Clone</button>
           <button class="btn primary" id="createNewBtn">+ Create New</button>
           <button class="btn" id="exportViewBtn">⬇ Export PI</button>
+          <button class="btn" id="confirmPiBtn" style="display:none" title="Chuyển đơn của sale vào Operations2025 (chỉ admin)">✔ Confirm → Operations2025</button>
         </div>
       </section>
 
@@ -415,6 +417,33 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
   </div>
 </div>
 
+<!-- ========== Modal Confirm PI → Operations2025 (chỉ admin) ========== -->
+<div class="overlay" id="cfOverlay" style="display:none">
+  <div class="modal">
+    <h3>Confirm → Operations2025 <span id="cfPiNo" class="code-chip"></span></h3>
+    <div class="vb-subtitle" id="cfInfo"></div>
+    <div class="picker-grid">
+      <label id="cfSoLabel">Số SO * <input type="text" id="cfSo" placeholder="100xxxxxxx"></label>
+      <label>Content <input type="text" id="cfContent" placeholder="VD: 1 cont 40'"></label>
+      <label>Status
+        <select id="cfStatus">
+          <option value="targeted" selected>targeted</option>
+          <option value="drafted">drafted</option>
+        </select>
+      </label>
+      <label>Month <input type="number" id="cfMonth" min="1" max="12"></label>
+    </div>
+    <p class="howto" style="margin-top:12px; font-size:12.5px; color:var(--muted)">
+      Đơn sẽ được ghi vào Operations2025 (Order + Details, giữ nguyên các cột công thức) và
+      <b>xóa khỏi file nháp của sale</b>. Đơn còn mã tạm Spare/NewRO sẽ bị chặn.
+    </p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="cfCancelBtn">Hủy</button>
+      <button class="btn primary" id="cfOkBtn">✔ Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== Modal xác nhận (thay confirm() mặc định của trình duyệt) ========== -->
 <div class="overlay" id="confirmOverlay" style="display:none">
   <div class="modal" style="width:380px">
@@ -537,7 +566,7 @@ function bootstrap() {
     S.cate = res.cate; S.models = res.models;
     $('loginScreen').style.display = 'none';
     $('mainScreen').style.display = 'block';
-    $('userInfo').textContent = S.user.name + (S.user.role === 'lead' ? ' (lead)' : '');
+    $('userInfo').textContent = S.user.name + (S.user.role !== 'sale' ? ' (' + S.user.role + ')' : '');
     $('rateInfo').textContent = 'Tỷ giá: ' + fmtN(S.dashboard.exchangeRate, 0) + ' VND/USD';
     renderClientList();
     renderPending(res.pendingProducts || []);
@@ -646,6 +675,10 @@ function selectOrder(i) {
   $('editBtn').disabled = !editable;
   $('editBtn').title = editable ? '' : 'Chỉ sửa được đơn có status drafted/targeted';
   $('cloneBtn').disabled = false;
+  // nút Confirm: chỉ admin, với đơn nằm trong file sale (New Created / Sale Edited)
+  var canConfirm = S.user.role === 'admin' && o.source === 'sale' &&
+    ['new created', 'sale edited'].indexOf((o.status || '').toLowerCase()) >= 0;
+  $('confirmPiBtn').style.display = canConfirm ? '' : 'none';
   $('orderSummary').innerHTML =
     '<span>PI: <b>' + esc(o.piNumber || o.so) + '</b></span>' +
     '<span>Sale Order <b>' + esc(o.so || '—') + '</b></span>' +
@@ -811,6 +844,7 @@ function saveDraft() {
           piNumber: $('edPiNumber').value.trim() || S.editor.piNumber,
           piDate: $('edPiDate').value || S.editor.piDate,
           status: S.editor.status,
+          ownerPic: S.editor.ownerPic || '',
           lines: S.editor.lines,
           discountPct: S.editor.discountPct,
           discountVal: S.editor.discountVal,
@@ -857,6 +891,7 @@ function restoreDraft(client, ed) {
   $('clientView').style.display = 'none';
   S.editor = {
     mode: ed.mode, piNumber: ed.piNumber, piDate: ed.piDate, status: ed.status,
+    ownerPic: ed.ownerPic || '',
     lines: ed.lines || [],
     discountPct: ed.discountPct || 0, discountVal: ed.discountVal || 0, other: ed.other || 0
   };
@@ -886,6 +921,8 @@ function openEditor(mode, piNumber, lines, existingOrder) {
     piNumber: piNumber,
     piDate: new Date().toISOString().slice(0, 10),
     status: mode === 'edit' ? 'Sale Edited' : 'New Created',
+    // admin sửa đơn của sale khác: giữ PIC gốc (server chỉ tôn trọng khi role=admin)
+    ownerPic: mode === 'edit' && existingOrder ? (existingOrder.pic || '') : '',
     lines: lines,
     discountPct: existingOrder ? 0 : 0,
     discountVal: existingOrder ? (existingOrder.discount || 0) : 0,
@@ -1099,6 +1136,7 @@ $('edSaveBtn').addEventListener('click', function () {
     piDate: ed.piDate,
     client: S.currentClient.name,
     status: ed.status,
+    ownerPic: ed.ownerPic || '',
     fob: Math.round(grand * 100) / 100,
     discount: ed.discountVal || 0,
     freight: ed.other || 0,
@@ -1735,6 +1773,49 @@ function doExport(format) {
   }).catch(function (e) { toast('Lỗi export: ' + e.message); })
     .finally(function () { loading(false); });
 }
+
+/* ================= Confirm PI → Operations2025 (chỉ admin) ================= */
+$('confirmPiBtn').addEventListener('click', function () {
+  var o = S.currentOrder;
+  if (!o) return;
+  var isUpdate = (o.status || '').toLowerCase() === 'sale edited';
+  $('cfPiNo').textContent = o.piNumber;
+  $('cfInfo').textContent = isUpdate
+    ? 'Ghi ngược cập nhật vào đơn có sẵn — SO ' + o.piNumber + ' · PIC ' + (o.pic || '?')
+    : 'Tạo dòng mới trong Operations2025 · PIC ' + (o.pic || '?');
+  $('cfSo').value = isUpdate ? o.piNumber : '';
+  $('cfSo').disabled = isUpdate;
+  $('cfContent').value = '';
+  $('cfStatus').value = 'targeted';
+  $('cfMonth').value = new Date().getMonth() + 1;
+  $('cfOverlay').style.display = 'flex';
+});
+$('cfCancelBtn').addEventListener('click', function () { $('cfOverlay').style.display = 'none'; });
+
+$('cfOkBtn').addEventListener('click', function () {
+  var o = S.currentOrder;
+  if (!o) return;
+  var isUpdate = (o.status || '').toLowerCase() === 'sale edited';
+  var so = $('cfSo').value.trim();
+  if (!isUpdate && !so) { toast('Nhập số SO.'); return; }
+  loading(true);
+  gs('api_confirmPI', S.token, {
+    piNumber: o.piNumber,
+    ownerPic: o.pic || '',
+    client: S.currentClient.name,
+    so: so,
+    content: $('cfContent').value.trim(),
+    status: $('cfStatus').value,
+    month: parseInt($('cfMonth').value, 10) || ''
+  }).then(function (res) {
+    $('cfOverlay').style.display = 'none';
+    toast(res.mode === 'update'
+      ? 'Đã ghi ngược cập nhật vào SO ' + res.so + ' và xóa bản nháp của sale.'
+      : 'Đã chuyển đơn vào Operations2025 (SO ' + res.so + ') và xóa bản nháp của sale.');
+    selectClient(S.currentClient); // nạp lại danh sách đơn (bản ops hiện ra thay bản nháp)
+  }).catch(function (e) { toast('Lỗi: ' + e.message); })
+    .finally(function () { loading(false); });
+});
 
 /* ================= Khách hàng mới ================= */
 $('newClientBtn').addEventListener('click', function () {
