@@ -424,6 +424,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
     <div class="vb-subtitle" id="cfInfo"></div>
     <div class="picker-grid">
       <label id="cfSoLabel">Số SO * <input type="text" id="cfSo" placeholder="100xxxxxxx"></label>
+      <label>Load Date * <input type="date" id="cfLoad"></label>
       <label>Content <input type="text" id="cfContent" placeholder="VD: 1 cont 40'"></label>
       <label>Status
         <select id="cfStatus">
@@ -1785,6 +1786,7 @@ $('confirmPiBtn').addEventListener('click', function () {
     : 'Tạo dòng mới trong Operations2025 · PIC ' + (o.pic || '?');
   $('cfSo').value = isUpdate ? o.piNumber : '';
   $('cfSo').disabled = isUpdate;
+  $('cfLoad').value = o.realLoad || ''; // prefill từ Expected_Load của PI nếu có
   $('cfContent').value = '';
   $('cfStatus').value = 'targeted';
   $('cfMonth').value = new Date().getMonth() + 1;
@@ -1798,12 +1800,15 @@ $('cfOkBtn').addEventListener('click', function () {
   var isUpdate = (o.status || '').toLowerCase() === 'sale edited';
   var so = $('cfSo').value.trim();
   if (!isUpdate && !so) { toast('Nhập số SO.'); return; }
+  var loadDate = $('cfLoad').value;
+  if (!loadDate) { toast('Nhập Load Date.'); return; }
   loading(true);
   gs('api_confirmPI', S.token, {
     piNumber: o.piNumber,
     ownerPic: o.pic || '',
     client: S.currentClient.name,
     so: so,
+    loadDate: loadDate,
     content: $('cfContent').value.trim(),
     status: $('cfStatus').value,
     month: parseInt($('cfMonth').value, 10) || ''
