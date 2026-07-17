@@ -507,12 +507,23 @@ gs('api_userNames').then(function (res) {
 $('loginBtn').addEventListener('click', doLogin);
 $('loginPin').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
+/** Rút gọn userAgent thành "Trình duyệt / HĐH" cho cột Device trong ActivityLogs. */
+function shortUA() {
+  var ua = navigator.userAgent;
+  var m = ua.match(/Edg\/(\d+)/) || ua.match(/Chrome\/(\d+)/) || ua.match(/Firefox\/(\d+)/) || ua.match(/Version\/(\d+).*Safari/);
+  var browser = !m ? 'Browser'
+    : (m[0].indexOf('Edg') === 0 ? 'Edge ' : m[0].indexOf('Chrome') === 0 ? 'Chrome ' : m[0].indexOf('Firefox') === 0 ? 'Firefox ' : 'Safari ') + m[1];
+  var os = /Windows NT 10/.test(ua) ? 'Windows 10/11' : /Windows/.test(ua) ? 'Windows'
+    : /Mac OS X/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : 'OS khác';
+  return browser + ' / ' + os;
+}
+
 function doLogin() {
   var name = $('loginName').value, pin = $('loginPin').value;
   if (!name || !pin) { $('loginError').textContent = 'Chọn tên và nhập PIN.'; return; }
   $('loginError').textContent = '';
   loading(true);
-  gs('api_login', name, pin).then(function (res) {
+  gs('api_login', name, pin, shortUA()).then(function (res) {
     S.token = res.token; S.user = res.user;
     return bootstrap();
   }).catch(function (e) {
@@ -530,6 +541,7 @@ function bootstrap() {
     $('rateInfo').textContent = 'Tỷ giá: ' + fmtN(S.dashboard.exchangeRate, 0) + ' VND/USD';
     renderClientList();
     renderPending(res.pendingProducts || []);
+    checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -780,6 +792,93 @@ function suggestPiNumber() {
   return base + String(maxN + 1).padStart(2, '0');
 }
 
+/* ================= Draft Auto-save (localStorage) ================= */
+var DRAFT_PREFIX = 'exportops_draft_';
+var _draftTimer = null;
+
+function draftKey() { return DRAFT_PREFIX + (S.user ? S.user.name : ''); }
+
+/** Lưu nháp (debounce 600ms) — gọi ở cuối renderTotals nên mọi thay đổi dòng hàng/discount đều được bắt. */
+function saveDraft() {
+  if (!S.editor || !S.currentClient) return;
+  clearTimeout(_draftTimer);
+  _draftTimer = setTimeout(function () {
+    try {
+      localStorage.setItem(draftKey(), JSON.stringify({
+        client: S.currentClient.name,
+        editor: {
+          mode: S.editor.mode,
+          piNumber: $('edPiNumber').value.trim() || S.editor.piNumber,
+          piDate: $('edPiDate').value || S.editor.piDate,
+          status: S.editor.status,
+          lines: S.editor.lines,
+          discountPct: S.editor.discountPct,
+          discountVal: S.editor.discountVal,
+          other: S.editor.other
+        },
+        savedAt: new Date().toISOString()
+      }));
+    } catch (e) { /* localStorage bị chặn (ẩn danh...) -> bỏ qua */ }
+  }, 600);
+}
+
+function clearDraft() {
+  clearTimeout(_draftTimer);
+  try { localStorage.removeItem(draftKey()); } catch (e) {}
+}
+
+/** Gọi 1 lần sau bootstrap: nếu có bản nháp chưa lưu của đúng user -> hỏi khôi phục. */
+function checkDraft() {
+  if (S._draftChecked) return;
+  S._draftChecked = true;
+  var raw = null;
+  try { raw = localStorage.getItem(draftKey()); } catch (e) {}
+  if (!raw) return;
+  var d;
+  try { d = JSON.parse(raw); } catch (e) { clearDraft(); return; }
+  if (!d || !d.editor || !d.editor.lines || !d.editor.lines.length) { clearDraft(); return; }
+  var client = S.clients.filter(function (c) { return c.name === d.client; })[0];
+  if (!client) { clearDraft(); toast('Có bản nháp cũ của khách "' + d.client + '" nhưng khách không còn trong danh sách — đã bỏ.'); return; }
+  var t = d.savedAt ? new Date(d.savedAt) : null;
+  var timeStr = t && !isNaN(t.getTime())
+    ? t.toLocaleDateString('vi-VN') + ' ' + ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) : '';
+  appConfirm(
+    'Tìm thấy bản nháp PI ' + d.editor.piNumber + ' (khách ' + d.client + (timeStr ? ', lúc ' + timeStr : '') + ') chưa lưu từ phiên trước. Khôi phục?',
+    function () { restoreDraft(client, d.editor); },
+    function () { clearDraft(); }
+  );
+}
+
+function restoreDraft(client, ed) {
+  S.currentClient = client;
+  renderClientList();
+  setSidebar(false);
+  $('emptyState').style.display = 'none';
+  $('clientView').style.display = 'none';
+  S.editor = {
+    mode: ed.mode, piNumber: ed.piNumber, piDate: ed.piDate, status: ed.status,
+    lines: ed.lines || [],
+    discountPct: ed.discountPct || 0, discountVal: ed.discountVal || 0, other: ed.other || 0
+  };
+  $('editorView').style.display = 'block';
+  $('edClient').value = client.name;
+  $('edPiNumber').value = ed.piNumber || '';
+  $('edPiDate').value = ed.piDate || '';
+  $('edStatus').textContent = ed.status || '';
+  $('tDiscountPct').value = S.editor.discountPct || '';
+  $('tDiscountVal').value = S.editor.discountVal || '';
+  $('tOther').value = S.editor.other || '';
+  if (!S.products) {
+    gs('api_products', S.token).then(function (r) {
+      S.products = r.products;
+      S.editor.lines.forEach(enrichFromCatalog);
+      renderLines();
+    }).catch(function () {});
+  }
+  renderLines();
+  toast('Đã khôi phục bản nháp.');
+}
+
 /* ================= Editor (form báo giá) ================= */
 function openEditor(mode, piNumber, lines, existingOrder) {
   S.editor = {
@@ -815,24 +914,27 @@ function openEditor(mode, piNumber, lines, existingOrder) {
 }
 
 /* Modal xác nhận riêng — confirm() mặc định của trình duyệt luôn kèm dòng "An embedded page at ... says" không bỏ được */
-var _confirmCb = null;
-function appConfirm(msg, onYes) {
+var _confirmCb = null, _confirmNoCb = null;
+function appConfirm(msg, onYes, onNo) {
   $('confirmMsg').textContent = msg;
   _confirmCb = onYes;
+  _confirmNoCb = onNo || null;
   $('confirmOverlay').style.display = 'flex';
 }
 $('confirmYesBtn').addEventListener('click', function () {
   $('confirmOverlay').style.display = 'none';
-  var cb = _confirmCb; _confirmCb = null;
+  var cb = _confirmCb; _confirmCb = null; _confirmNoCb = null;
   if (cb) cb();
 });
 $('confirmNoBtn').addEventListener('click', function () {
   $('confirmOverlay').style.display = 'none';
-  _confirmCb = null;
+  var cb = _confirmNoCb; _confirmCb = null; _confirmNoCb = null;
+  if (cb) cb();
 });
 
 $('edCancelBtn').addEventListener('click', function () {
   appConfirm('Hủy và quay lại? Các thay đổi chưa lưu sẽ mất.', function () {
+    clearDraft(); // hủy có chủ đích -> bỏ luôn bản nháp tự lưu
     $('editorView').style.display = 'none';
     $('clientView').style.display = 'block';
   });
@@ -920,6 +1022,7 @@ function renderTotals() {
   lnEl.style.color = lnPct == null ? '' : (lnPct < 0 ? 'var(--danger)' : (lnPct < S.dashboard.minMargin * 100 ? 'var(--warn)' : ''));
   $('tCbm').textContent = fmtN(cbm);
   $('tCont').textContent = containerEstimate(cbm);
+  saveDraft(); // mọi thay đổi trên form đều đi qua đây -> tự lưu nháp
 }
 
 /** 40' = 67 CBM, 20' = 27–28 CBM, < 20 CBM → LCL */
@@ -958,6 +1061,8 @@ $('tOther').addEventListener('change', function () {
   S.editor.other = parseFloat(this.value) || 0;
   renderTotals();
 });
+$('edPiNumber').addEventListener('change', saveDraft);
+$('edPiDate').addEventListener('change', saveDraft);
 
 $('addLineBtn').addEventListener('click', function () {
   S.editor.lines.push(makeLine('', '', '', 0, 0, 0, 0, 0, 0));
@@ -1004,6 +1109,7 @@ $('edSaveBtn').addEventListener('click', function () {
   };
   loading(true);
   gs('api_savePI', S.token, payload).then(function (res) {
+    clearDraft(); // đã lưu chính thức -> bỏ bản nháp tự lưu
     toast('Đã lưu PI ' + res.piNumber + ' vào ' + res.savedTo + ' (status: ' + ed.status + ').');
     $('editorView').style.display = 'none';
     selectClient(S.currentClient); // reload danh sách đơn
