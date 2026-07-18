@@ -559,14 +559,35 @@ function doLogin() {
   loading(true);
   gs('api_login', name, pin, shortUA()).then(function (res) {
     S.token = res.token; S.user = res.user;
+    // ghi nhớ phiên (server vẫn hết hạn sau 6h; Đăng xuất sẽ xóa)
+    try { localStorage.setItem('exportops_session', JSON.stringify({ token: res.token, user: res.user })); } catch (e) {}
     return bootstrap();
   }).catch(function (e) {
     $('loginError').textContent = e.message;
   }).finally(function () { loading(false); });
 }
 
+/** Khôi phục phiên đã lưu: có token còn hạn -> vào thẳng, không cần đăng nhập lại. */
+(function tryRestoreSession() {
+  var raw = null;
+  try { raw = localStorage.getItem('exportops_session'); } catch (e) {}
+  if (!raw) return;
+  var sess;
+  try { sess = JSON.parse(raw); } catch (e) { return; }
+  if (!sess || !sess.token) return;
+  S.token = sess.token;
+  S.user = sess.user;
+  loading(true);
+  bootstrap().catch(function () {
+    // token hết hạn -> quay về màn hình đăng nhập
+    S.token = null; S.user = null;
+    try { localStorage.removeItem('exportops_session'); } catch (e) {}
+  }).finally(function () { loading(false); });
+})();
+
 function bootstrap() {
   return gs('api_bootstrap', S.token).then(function (res) {
+    if (res.user) S.user = res.user; // khôi phục phiên: user lấy từ server
     S.dashboard = res.dashboard; S.clients = res.clients;
     S.cate = res.cate; S.models = res.models;
     $('loginScreen').style.display = 'none';
@@ -585,7 +606,10 @@ function bootstrap() {
   });
 }
 
-$('logoutBtn').addEventListener('click', function () { location.reload(); });
+$('logoutBtn').addEventListener('click', function () {
+  try { localStorage.removeItem('exportops_session'); } catch (e) {}
+  location.reload();
+});
 $('refreshBtn').addEventListener('click', function () {
   loading(true);
   gs('api_refreshCache', S.token)
@@ -904,6 +928,28 @@ function checkDraft() {
   );
   return true;
 }
+
+/* Nhận lệnh nhảy đơn từ tab Shipment Tracking đang mở song song (không cần reload/đăng nhập lại):
+   - window.name cố định để shipment focus/điều hướng đúng tab này
+   - BroadcastChannel: shipment gửi {type:'open-so', so, nonce}; nếu đã đăng nhập thì ack + tự chuyển đơn */
+try { window.name = 'exportops-piapp'; } catch (e) {}
+try {
+  var _dlChannel = new BroadcastChannel('exportops-deeplink');
+  _dlChannel.onmessage = function (ev) {
+    var msg = ev.data || {};
+    if (msg.type !== 'open-so' || !msg.so) return;
+    if (!S.token || !S.clients.length) return; // chưa đăng nhập -> không ack, bên shipment sẽ mở tab kèm ?so
+    _dlChannel.postMessage({ type: 'ack', nonce: msg.nonce });
+    var jump = function () {
+      DEEP_SO = String(msg.so);
+      S._deepLinkDone = false;
+      handleDeepLink();
+    };
+    if ($('editorView').style.display === 'block') {
+      appConfirm('Chuyển sang đơn SO ' + msg.so + '? Nội dung đang soạn đã được tự lưu nháp.', jump);
+    } else jump();
+  };
+} catch (e) { /* trình duyệt cũ không có BroadcastChannel -> vẫn còn đường mở tab kèm ?so */ }
 
 /** Deep-link ?so= từ Shipment Tracking: tra đơn -> kiểm tra quyền qua danh sách khách -> mở thẳng. */
 function handleDeepLink() {

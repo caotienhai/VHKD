@@ -412,6 +412,34 @@ function buildRow(row, idx){
   };
 }
 
+/**
+ * Mở đơn SO bên PI-app cho mượt:
+ * 1) Hỏi qua BroadcastChannel — nếu có tab pi-app đang đăng nhập, tab đó tự chuyển sang đơn (không reload),
+ *    mình chỉ cần đưa tab đó lên trước.
+ * 2) Không có ai trả lời trong 300ms -> mở/điều hướng tab tên 'exportops-piapp' kèm ?so=
+ *    (pi-app có lưu phiên đăng nhập trong localStorage nên thường cũng không phải nhập PIN lại).
+ */
+function openInPiApp(so){
+  const url = 'pi-app.html?so=' + encodeURIComponent(so);
+  let bc = null;
+  try{ bc = new BroadcastChannel('exportops-deeplink'); }catch(e){}
+  if(!bc){ window.open(url, 'exportops-piapp'); return; }
+  const nonce = Math.random().toString(36).slice(2);
+  let acked = false;
+  bc.onmessage = (ev)=>{
+    if(ev.data && ev.data.type === 'ack' && ev.data.nonce === nonce) acked = true;
+  };
+  bc.postMessage({type:'open-so', so: String(so), nonce});
+  setTimeout(()=>{
+    bc.close();
+    if(acked){
+      try{ window.open('', 'exportops-piapp'); }catch(e){} // chỉ focus tab pi-app sẵn có
+    }else{
+      window.open(url, 'exportops-piapp'); // chưa mở/chưa đăng nhập -> mở tab (kèm ?so để tự nhảy sau login)
+    }
+  }, 300);
+}
+
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -566,9 +594,7 @@ function renderRow(r){
   const tdSo = document.createElement('td');
   if(r.so){
     tdSo.innerHTML = `<span class="mono" style="cursor:pointer" title="Double-click để mở Edit Details bên PI-app">${escapeHtml(r.so)}</span>`;
-    tdSo.addEventListener('dblclick', ()=>{
-      window.open('pi-app.html?so=' + encodeURIComponent(r.so), '_blank', 'noopener');
-    });
+    tdSo.addEventListener('dblclick', ()=>openInPiApp(r.so));
   }else{
     tdSo.textContent = '—';
   }
