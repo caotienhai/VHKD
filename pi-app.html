@@ -132,6 +132,23 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
 .bom-price-row { display: flex; gap: 14px; align-items: center; margin-top: 16px; padding: 12px; background: var(--accent-soft); border-radius: 8px; }
 .vb-subtitle { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
 
+/* ---------- Autocomplete tìm sản phẩm ---------- */
+.ac-wrap { position: relative; }
+.ac-wrap input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14.5px; }
+.ac-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ac-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(26,35,50,.18); max-height: 320px; overflow-y: auto; z-index: 20; }
+.ac-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; border-top: 1px solid var(--line-soft, #eef1f5); }
+.ac-item:first-child { border-top: none; }
+.ac-item:hover, .ac-item.active { background: var(--accent-soft); }
+.ac-item .ac-main { min-width: 0; }
+.ac-item .ac-name { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-item .ac-meta { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.ac-item .ac-price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ac-item .ac-hub { font-weight: 600; font-size: 13.5px; }
+.ac-item .ac-last { font-size: 11.5px; color: var(--warn); }
+.ac-empty { padding: 12px; font-size: 13px; color: var(--muted); }
+.ac-or { font-size: 12px; color: var(--muted); background: var(--card); padding: 0 8px; position: relative; top: -10px; left: 12px; }
+
 /* ---------- Toast & loading ---------- */
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 99; }
 .toast.show { opacity: 1; }
@@ -299,6 +316,11 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
 <div class="overlay" id="pickerOverlay" style="display:none">
   <div class="modal">
     <h3>Chọn sản phẩm</h3>
+    <div class="ac-wrap">
+      <input type="search" id="pkSearch" placeholder="🔍 Gõ mã hoặc tên sản phẩm (từ 2 ký tự)…" autocomplete="off">
+      <div class="ac-list" id="pkSearchList" style="display:none"></div>
+    </div>
+    <div class="divider" style="margin:14px 0"><span class="ac-or">hoặc chọn theo nhóm</span></div>
     <div class="picker-grid">
       <label>Category <select id="pkCategory"></select></label>
       <label>Model <select id="pkModel"></select></label>
@@ -1254,7 +1276,117 @@ function openPicker(rowIdx) {
   $('pkNewProduct').style.display = 'none';
   $('pkSpareForm').style.display = 'none';
   document.querySelectorAll('input[name="pkType"]').forEach(function (r) { r.checked = false; });
+  $('pkSearch').value = '';
+  $('pkSearchList').style.display = 'none';
+  loadClientHistory(); // nạp giá bán gần nhất của khách (cho dropdown gợi ý)
   $('pickerOverlay').style.display = 'flex';
+  setTimeout(function () { $('pkSearch').focus(); }, 50);
+}
+
+/* ---------- Autocomplete tìm nhanh sản phẩm ---------- */
+
+/** Áp sản phẩm hub vào dòng: mọi cột theo hub, Qty + Đơn giá để trống cho sale tự điền. */
+function applyProductToLine(line, p) {
+  line.code = p.code; line.product = p.name; line.brand = p.brand;
+  line.qtyCt = p.qtyCt; line.l = p.l; line.w = p.w; line.h = p.h;
+  line.proposed = p.price; line.isNew = false; line.type = '';
+  line.qty = ''; line.price = '';
+}
+
+/** Lịch sử giá bán gần nhất theo khách đang chọn (cache 1 khách/lần). */
+function loadClientHistory() {
+  if (!S.currentClient) return;
+  if (S._histClientName === S.currentClient.name) return;
+  S._histClientName = S.currentClient.name;
+  S._histMap = {};
+  gs('api_clientCodesSummary', S.token, S.currentClient.name).then(function (res) {
+    (res.codes || []).forEach(function (c) {
+      S._histMap[c.code] = { price: c.lastPrice, date: c.lastDate };
+    });
+    if ($('pkSearchList').style.display !== 'none') renderSearchList(); // đang mở dropdown -> vẽ lại kèm giá
+  }).catch(function () {});
+}
+
+var _acItems = [], _acActive = -1;
+
+function searchProducts(q) {
+  if (!S.products) return [];
+  var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  var starts = [], contains = [];
+  for (var i = 0; i < S.products.length; i++) {
+    var p = S.products[i];
+    var hay = (p.code + ' ' + p.name + ' ' + (p.nameEn || '') + ' ' + p.model + ' ' + p.brand).toLowerCase();
+    var ok = true;
+    for (var t = 0; t < terms.length; t++) { if (hay.indexOf(terms[t]) < 0) { ok = false; break; } }
+    if (!ok) continue;
+    // mã bắt đầu bằng từ khóa xếp trước
+    if (p.code.toLowerCase().indexOf(terms[0]) === 0) starts.push(p); else contains.push(p);
+    if (starts.length >= 20) break;
+  }
+  return starts.concat(contains).slice(0, 20);
+}
+
+function renderSearchList() {
+  var q = $('pkSearch').value.trim();
+  var listEl = $('pkSearchList');
+  if (q.length < 2) { listEl.style.display = 'none'; _acItems = []; _acActive = -1; return; }
+  _acItems = searchProducts(q);
+  _acActive = _acItems.length ? 0 : -1;
+  if (!S.products) {
+    listEl.innerHTML = '<div class="ac-empty">Đang tải catalog sản phẩm…</div>';
+    listEl.style.display = 'block';
+    return;
+  }
+  if (!_acItems.length) {
+    listEl.innerHTML = '<div class="ac-empty">Không tìm thấy — thử từ khóa khác hoặc chọn theo nhóm bên dưới.</div>';
+    listEl.style.display = 'block';
+    return;
+  }
+  listEl.innerHTML = _acItems.map(function (p, i) {
+    var hist = S._histMap && S._histMap[p.code];
+    return '<div class="ac-item' + (i === _acActive ? ' active' : '') + '" data-i="' + i + '">' +
+      '<div class="ac-main">' +
+        '<div class="ac-name"><span class="code-chip">' + esc(p.code) + '</span> ' + esc(p.name) + '</div>' +
+        '<div class="ac-meta">' + esc([p.category, p.model, p.brand].filter(Boolean).join(' · ')) + '</div>' +
+      '</div>' +
+      '<div class="ac-price">' +
+        '<div class="ac-hub">' + (p.price ? fmt$(p.price) : '—') + '</div>' +
+        (hist ? '<div class="ac-last">Gần nhất ' + fmt$(hist.price) + (hist.date ? ' (' + esc(hist.date) + ')' : '') + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+  listEl.style.display = 'block';
+  listEl.querySelectorAll('.ac-item').forEach(function (el) {
+    el.addEventListener('mousedown', function (ev) { // mousedown để thắng blur của input
+      ev.preventDefault();
+      pickSearchResult(parseInt(el.getAttribute('data-i'), 10));
+    });
+  });
+}
+
+function pickSearchResult(i) {
+  var p = _acItems[i];
+  var line = S.editor && S.editor.lines[S.pickerRowIdx];
+  if (!p || !line) return;
+  applyProductToLine(line, p);
+  $('pickerOverlay').style.display = 'none';
+  $('pkSearchList').style.display = 'none';
+  renderLines();
+}
+
+$('pkSearch').addEventListener('input', renderSearchList);
+$('pkSearch').addEventListener('keydown', function (ev) {
+  if (!_acItems.length) return;
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); _acActive = Math.min(_acActive + 1, _acItems.length - 1); highlightAc(); }
+  else if (ev.key === 'ArrowUp') { ev.preventDefault(); _acActive = Math.max(_acActive - 1, 0); highlightAc(); }
+  else if (ev.key === 'Enter') { ev.preventDefault(); if (_acActive >= 0) pickSearchResult(_acActive); }
+  else if (ev.key === 'Escape') { $('pkSearchList').style.display = 'none'; }
+});
+function highlightAc() {
+  document.querySelectorAll('#pkSearchList .ac-item').forEach(function (el, i) {
+    el.classList.toggle('active', i === _acActive);
+    if (i === _acActive) el.scrollIntoView({ block: 'nearest' });
+  });
 }
 
 $('pkCategory').addEventListener('change', function () {
@@ -1303,12 +1435,7 @@ $('pkOkBtn').addEventListener('click', function () {
   if (!codeVal) { toast('Chọn mã hoặc New Product.'); return; }
 
   if (codeVal !== '__NEW__') {
-    // sản phẩm có sẵn trong hub: mọi cột lấy theo hub, riêng Qty + Đơn giá để trống cho sale tự điền
-    var p = findProduct(codeVal);
-    line.code = p.code; line.product = p.name; line.brand = p.brand;
-    line.qtyCt = p.qtyCt; line.l = p.l; line.w = p.w; line.h = p.h;
-    line.proposed = p.price; line.isNew = false; line.type = '';
-    line.qty = ''; line.price = '';
+    applyProductToLine(line, findProduct(codeVal)); // mọi cột theo hub, Qty + Đơn giá để trống
     $('pickerOverlay').style.display = 'none';
     renderLines();
     return;
