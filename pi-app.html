@@ -471,6 +471,10 @@ var S = {
 };
 
 var EDITABLE_STATUSES = ['drafted', 'targeted', 'sale edited', 'new created'];
+// deep-link từ Shipment Tracking: pi-app.html?so=<SO> -> mở thẳng đơn đó (sau khi login = chốt phân quyền)
+var DEEP_SO = (function () {
+  try { return new URLSearchParams(location.search).get('so') || ''; } catch (e) { return ''; }
+})();
 var BOM_SLOTS = [
   { key: 'Model', from: 'models' },
   { key: 'Filter Housing', from: 'modelsHousing' },
@@ -571,7 +575,8 @@ function bootstrap() {
     $('rateInfo').textContent = 'Tỷ giá: ' + fmtN(S.dashboard.exchangeRate, 0) + ' VND/USD';
     renderClientList();
     renderPending(res.pendingProducts || []);
-    checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
+    var draftPrompted = checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
+    if (!draftPrompted) handleDeepLink(); // có draft -> deep-link xử lý sau khi người dùng trả lời modal
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -634,7 +639,7 @@ function renderPending(list) {
 }
 
 /* ================= Chọn khách → xem đơn ================= */
-function selectClient(c) {
+function selectClient(c, targetSo) {
   S.currentClient = c;
   renderClientList();
   setSidebar(false); // ẩn panel trái, bấm "Chọn khách khác" để hiện lại
@@ -660,8 +665,16 @@ function selectClient(c) {
       var label = (o.so || o.piNumber) + ' -- ' + (o.realLoad || '') + ' -- ' + fmt$(o.fob) + ' -- ' + (o.status || '?');
       return '<option value="' + i + '">' + esc(label) + '</option>';
     }).join('');
-    sel.value = '0';
-    selectOrder(0); // đơn mới nhất
+    // deep-link: chọn đúng đơn theo SO thay vì đơn mới nhất
+    var startIdx = 0;
+    if (targetSo) {
+      var key = String(targetSo).toLowerCase();
+      for (var i = 0; i < S.orders.length; i++) {
+        if (String(S.orders[i].so).toLowerCase() === key || String(S.orders[i].piNumber).toLowerCase() === key) { startIdx = i; break; }
+      }
+    }
+    sel.value = String(startIdx);
+    selectOrder(startIdx);
   }).catch(function (e) { toast('Lỗi: ' + e.message); })
     .finally(function () { loading(false); });
 }
@@ -695,6 +708,12 @@ function selectOrder(i) {
   }).then(function (res) {
     S.currentLines = res.lines;
     renderOrderDetailRows();
+    // deep-link: tự vào Edit Details nếu đơn cho phép sửa
+    if (S._autoEditOnce) {
+      S._autoEditOnce = false;
+      if (!$('editBtn').disabled) $('editBtn').click();
+      else toast('Đơn ' + (o.piNumber || o.so) + ' đang ở status "' + (o.status || '?') + '" — chỉ xem, không sửa được.');
+    }
   }).catch(function (e) { toast('Lỗi: ' + e.message); })
     .finally(function () { loading(false); });
 }
@@ -862,26 +881,48 @@ function clearDraft() {
   try { localStorage.removeItem(draftKey()); } catch (e) {}
 }
 
-/** Gọi 1 lần sau bootstrap: nếu có bản nháp chưa lưu của đúng user -> hỏi khôi phục. */
+/** Gọi 1 lần sau bootstrap: nếu có bản nháp chưa lưu của đúng user -> hỏi khôi phục.
+ *  Trả về true nếu có hiện modal hỏi (deep-link sẽ chờ người dùng trả lời xong). */
 function checkDraft() {
-  if (S._draftChecked) return;
+  if (S._draftChecked) return false;
   S._draftChecked = true;
   var raw = null;
   try { raw = localStorage.getItem(draftKey()); } catch (e) {}
-  if (!raw) return;
+  if (!raw) return false;
   var d;
-  try { d = JSON.parse(raw); } catch (e) { clearDraft(); return; }
-  if (!d || !d.editor || !d.editor.lines || !d.editor.lines.length) { clearDraft(); return; }
+  try { d = JSON.parse(raw); } catch (e) { clearDraft(); return false; }
+  if (!d || !d.editor || !d.editor.lines || !d.editor.lines.length) { clearDraft(); return false; }
   var client = S.clients.filter(function (c) { return c.name === d.client; })[0];
-  if (!client) { clearDraft(); toast('Có bản nháp cũ của khách "' + d.client + '" nhưng khách không còn trong danh sách — đã bỏ.'); return; }
+  if (!client) { clearDraft(); toast('Có bản nháp cũ của khách "' + d.client + '" nhưng khách không còn trong danh sách — đã bỏ.'); return false; }
   var t = d.savedAt ? new Date(d.savedAt) : null;
   var timeStr = t && !isNaN(t.getTime())
     ? t.toLocaleDateString('vi-VN') + ' ' + ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) : '';
   appConfirm(
     'Tìm thấy bản nháp PI ' + d.editor.piNumber + ' (khách ' + d.client + (timeStr ? ', lúc ' + timeStr : '') + ') chưa lưu từ phiên trước. Khôi phục?',
-    function () { restoreDraft(client, d.editor); },
-    function () { clearDraft(); }
+    function () { restoreDraft(client, d.editor); }, // chọn khôi phục nháp -> bỏ deep-link (ưu tiên dữ liệu chưa lưu)
+    function () { clearDraft(); handleDeepLink(); }
   );
+  return true;
+}
+
+/** Deep-link ?so= từ Shipment Tracking: tra đơn -> kiểm tra quyền qua danh sách khách -> mở thẳng. */
+function handleDeepLink() {
+  if (!DEEP_SO || S._deepLinkDone) return;
+  S._deepLinkDone = true;
+  loading(true);
+  gs('api_findOrderBySo', S.token, DEEP_SO).then(function (res) {
+    var o = res.order;
+    var client = S.clients.filter(function (c) {
+      return c.name.toLowerCase() === String(o.client || '').toLowerCase();
+    })[0];
+    if (!client) {
+      toast('SO ' + DEEP_SO + ' thuộc khách "' + o.client + '" — bạn không có quyền truy cập.');
+      return;
+    }
+    S._autoEditOnce = true; // sau khi chi tiết đơn tải xong -> tự vào Edit Details (nếu status cho phép)
+    selectClient(client, o.so || o.piNumber);
+  }).catch(function (e) { toast('Lỗi deep-link: ' + e.message); })
+    .finally(function () { loading(false); });
 }
 
 function restoreDraft(client, ed) {

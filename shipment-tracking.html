@@ -188,10 +188,12 @@
   </div>
 
   <div class="card">
+    <div id="fobTotal" style="padding:12px 14px 4px; font-weight:700; font-size:15px"></div>
     <div class="tablewrap">
       <table id="ordersTable">
         <thead>
           <tr>
+            <th>SO</th>
             <th>Client</th>
             <th>Country</th>
             <th>FOB value</th>
@@ -204,7 +206,7 @@
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="9"><div class="empty-state">Đang tải dữ liệu từ Google Sheet…</div></td></tr>
+          <tr><td colspan="10"><div class="empty-state">Đang tải dữ liệu từ Google Sheet…</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -400,7 +402,7 @@ function buildRow(row, idx){
   const sheetRow = row.sheetRow;
 
   return {
-    idx, rowKey, sheetRow, client, country, fobDisplay, realLoadDate, etdDate, etaDate, monthKey,
+    idx, rowKey, sheetRow, so, client, country, fobDisplay, realLoadDate, etdDate, etaDate, monthKey,
     status: ov.statusOverride || status,
     booking: ov.booking != null ? ov.booking : sheetBooking,
     line: ov.line != null ? ov.line : sheetLine,
@@ -527,13 +529,27 @@ function renderForSelectedMonth(){
   const rows = allRows.filter(r=>r.monthKey === monthVal);
   const tbody = document.getElementById('tbody');
   if(!rows.length){
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">Không có đơn hàng nào trong tháng ${monthVal}.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">Không có đơn hàng nào trong tháng ${monthVal}.</div></td></tr>`;
     updateProgressText(0,0);
+    updateFobTotal(rows, monthVal);
     return;
   }
   tbody.innerHTML = '';
   rows.forEach(r=>tbody.appendChild(renderRow(r)));
   updateProgressText(0, rows.filter(r=>r.booking && r.line).length);
+  updateFobTotal(rows, monthVal);
+}
+
+/** Tổng FOB của tháng đang xem (parse chuỗi "$1,234.56" -> số; ô rỗng/không phải số tính 0). */
+function updateFobTotal(rows, monthVal){
+  const total = rows.reduce((sum, r)=>{
+    const n = parseFloat(String(r.fobDisplay||'').replace(/[$,\s]/g,''));
+    return sum + (isNaN(n) ? 0 : n);
+  }, 0);
+  const el = document.getElementById('fobTotal');
+  el.textContent = rows.length
+    ? `Tổng FOB tháng ${monthVal}: $${total.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2})} · ${rows.length} đơn`
+    : '';
 }
 
 function updateProgressText(done, total){
@@ -546,6 +562,16 @@ function updateProgressText(done, total){
 function renderRow(r){
   const tr = document.createElement('tr');
   tr.dataset.rowkey = r.rowKey;
+
+  const tdSo = document.createElement('td');
+  if(r.so){
+    tdSo.innerHTML = `<span class="mono" style="cursor:pointer" title="Double-click để mở Edit Details bên PI-app">${escapeHtml(r.so)}</span>`;
+    tdSo.addEventListener('dblclick', ()=>{
+      window.open('pi-app.html?so=' + encodeURIComponent(r.so), '_blank', 'noopener');
+    });
+  }else{
+    tdSo.textContent = '—';
+  }
 
   const tdClient = document.createElement('td');
   tdClient.innerHTML = `<div class="client">${escapeHtml(r.client)}</div>`;
@@ -578,7 +604,7 @@ function renderRow(r){
   tdAction.className = 'actioncell cell-action';
   renderActionCell(tdAction, r, tdBooking, tdLine, tdTrack);
 
-  tr.append(tdClient, tdCountry, tdFob, tdLoad, tdStatus, tdBooking, tdLine, tdTrack, tdAction);
+  tr.append(tdSo, tdClient, tdCountry, tdFob, tdLoad, tdStatus, tdBooking, tdLine, tdTrack, tdAction);
   return tr;
 }
 
