@@ -413,31 +413,35 @@ function buildRow(row, idx){
 }
 
 /**
- * Mở đơn SO bên PI-app cho mượt:
- * 1) Hỏi qua BroadcastChannel — nếu có tab pi-app đang đăng nhập, tab đó tự chuyển sang đơn (không reload),
- *    mình chỉ cần đưa tab đó lên trước.
- * 2) Không có ai trả lời trong 300ms -> mở/điều hướng tab tên 'exportops-piapp' kèm ?so=
- *    (pi-app có lưu phiên đăng nhập trong localStorage nên thường cũng không phải nhập PIN lại).
+ * Mở đơn SO bên PI-app:
+ * - Giữ tham chiếu tab pi-app do chính trang này mở (piWin). Trình duyệt chỉ cho phép focus
+ *   tab mà mình nắm tham chiếu — tab pi-app người dùng tự mở tay thì KHÔNG focus được (rào bảo mật).
+ * - Có piWin còn sống: gửi lệnh chuyển đơn qua BroadcastChannel (không reload) rồi focus;
+ *   tab đó chưa đăng nhập (không ack trong 250ms) thì điều hướng nó kèm ?so.
+ * - Chưa có piWin: mở tab mới kèm ?so (pi-app tự đăng nhập bằng phiên đã lưu) — các lần sau tái sử dụng.
  */
+let piWin = null;
 function openInPiApp(so){
   const url = 'pi-app.html?so=' + encodeURIComponent(so);
-  let bc = null;
-  try{ bc = new BroadcastChannel('exportops-deeplink'); }catch(e){}
-  if(!bc){ window.open(url, 'exportops-piapp'); return; }
-  const nonce = Math.random().toString(36).slice(2);
-  let acked = false;
-  bc.onmessage = (ev)=>{
-    if(ev.data && ev.data.type === 'ack' && ev.data.nonce === nonce) acked = true;
-  };
-  bc.postMessage({type:'open-so', so: String(so), nonce});
-  setTimeout(()=>{
-    bc.close();
-    if(acked){
-      try{ window.open('', 'exportops-piapp'); }catch(e){} // chỉ focus tab pi-app sẵn có
-    }else{
-      window.open(url, 'exportops-piapp'); // chưa mở/chưa đăng nhập -> mở tab (kèm ?so để tự nhảy sau login)
-    }
-  }, 300);
+  if(piWin && !piWin.closed){
+    let bc = null;
+    try{ bc = new BroadcastChannel('exportops-deeplink'); }catch(e){}
+    if(!bc){ piWin = window.open(url, 'exportops-piapp'); try{ piWin.focus(); }catch(e){} return; }
+    const nonce = Math.random().toString(36).slice(2);
+    let acked = false;
+    bc.onmessage = (ev)=>{
+      if(ev.data && ev.data.type === 'ack' && ev.data.nonce === nonce) acked = true;
+    };
+    bc.postMessage({type:'open-so', so: String(so), nonce});
+    setTimeout(()=>{
+      bc.close();
+      if(!acked){ piWin = window.open(url, 'exportops-piapp'); } // tab chưa login -> điều hướng kèm ?so
+      try{ piWin.focus(); }catch(e){}
+    }, 250);
+  }else{
+    piWin = window.open(url, 'exportops-piapp');
+    try{ piWin.focus(); }catch(e){}
+  }
 }
 
 function escapeHtml(s){
