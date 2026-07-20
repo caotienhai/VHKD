@@ -220,6 +220,32 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
         <p>Chọn một khách hàng để xem đơn hàng và lập báo giá.</p>
       </div>
 
+      <!-- Dashboard doanh thu FOB cho lead -->
+      <section id="revenueView" style="display:none">
+        <div class="client-header">
+          <div>
+            <h2>Doanh thu FOB theo tháng</h2>
+            <div class="client-meta" id="revMeta"></div>
+          </div>
+          <div class="order-picker" style="display:flex;align-items:center;gap:8px">
+            <button class="btn small" id="revPrev">◀</button>
+            <b id="revMonthLabel" style="min-width:90px;text-align:center"></b>
+            <button class="btn small" id="revNext">▶</button>
+          </div>
+        </div>
+        <div class="totals-panel" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+          <div class="tp-cell"><div class="tp-label">Tổng FOB tháng</div><div class="tp-value big" id="revTotal">$0.00</div></div>
+          <div class="tp-cell"><div class="tp-label">Số đơn</div><div class="tp-value" id="revCount">0</div></div>
+          <div class="tp-cell"><div class="tp-label">Số khách</div><div class="tp-value" id="revClients">0</div></div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="revTable">
+            <thead><tr><th>Sale</th><th class="num">Số đơn</th><th class="num">Tổng FOB</th><th class="num">Tỷ trọng</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Hàng đợi review cho technician -->
       <section id="queueView" style="display:none">
         <div class="client-header">
@@ -248,6 +274,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <div class="client-meta" id="cvMeta"></div>
             <button class="btn small" id="otherClientBtn" style="margin-top:8px">⇄ Chọn khách khác</button>
             <button class="btn small" id="backToQueueBtn" style="margin-top:8px;display:none">⟵ Danh sách cần kiểm tra</button>
+            <button class="btn small" id="backToRevenueBtn" style="margin-top:8px;display:none">⟵ Doanh thu theo tháng</button>
           </div>
           <div class="order-picker">
             <label>Đơn hàng
@@ -644,6 +671,7 @@ function bootstrap() {
     var draftPrompted = checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
     if (!draftPrompted) handleDeepLink(); // có draft -> deep-link xử lý sau khi người dùng trả lời modal
     if (!draftPrompted && !DEEP_SO && S.user.role === 'technician') loadReviewQueue(); // technician: hiện ngay hàng đợi review
+    if (!draftPrompted && !DEEP_SO && S.user.role === 'lead') loadRevenue(); // lead: hiện ngay dashboard doanh thu
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -715,7 +743,9 @@ function selectClient(c, targetSo) {
   setSidebar(false); // ẩn panel trái, bấm "Chọn khách khác" để hiện lại
   $('emptyState').style.display = 'none';
   $('queueView').style.display = 'none';
+  $('revenueView').style.display = 'none';
   $('backToQueueBtn').style.display = S.user.role === 'technician' ? '' : 'none';
+  $('backToRevenueBtn').style.display = S.user.role === 'lead' ? '' : 'none';
   $('editorView').style.display = 'none';
   $('clientView').style.display = 'block';
   $('cvName').textContent = c.name;
@@ -755,6 +785,58 @@ function selectClient(c, targetSo) {
 }
 
 $('orderSelect').addEventListener('change', function () { selectOrder(parseInt(this.value, 10)); });
+
+/* ================= Dashboard doanh thu FOB (lead) ================= */
+function loadRevenue() {
+  $('emptyState').style.display = 'none';
+  $('clientView').style.display = 'none';
+  $('editorView').style.display = 'none';
+  $('queueView').style.display = 'none';
+  $('revenueView').style.display = 'block';
+  if (!S.revMonth) S.revMonth = new Date().toISOString().slice(0, 7); // yyyy-MM hiện tại
+  if (S.revOrders) { renderRevenue(); return; }
+  $('revTable').querySelector('tbody').innerHTML = '<tr><td colspan="4" style="color:var(--muted)">Đang tải…</td></tr>';
+  loading(true);
+  gs('api_revenueOrders', S.token).then(function (res) {
+    S.revOrders = res.orders || [];
+    renderRevenue();
+  }).catch(function (e) { toast('Lỗi tải doanh thu: ' + e.message); })
+    .finally(function () { loading(false); });
+}
+
+function shiftRevMonth(delta) {
+  var y = +S.revMonth.slice(0, 4), m = +S.revMonth.slice(5, 7) - 1 + delta;
+  var d = new Date(y, m, 1);
+  S.revMonth = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+  renderRevenue();
+}
+$('revPrev').addEventListener('click', function () { shiftRevMonth(-1); });
+$('revNext').addEventListener('click', function () { shiftRevMonth(1); });
+$('backToRevenueBtn').addEventListener('click', loadRevenue);
+
+function renderRevenue() {
+  $('revMonthLabel').textContent = S.revMonth;
+  var rows = (S.revOrders || []).filter(function (o) { return o.monthKey === S.revMonth; });
+  var total = 0, bySale = {}, clients = {};
+  rows.forEach(function (o) {
+    var fob = Number(o.fob) || 0; total += fob;
+    var s = o.pic || '(không rõ)';
+    if (!bySale[s]) bySale[s] = { sale: s, count: 0, fob: 0 };
+    bySale[s].count++; bySale[s].fob += fob;
+    if (o.client) clients[o.client.toLowerCase()] = 1;
+  });
+  $('revTotal').textContent = fmt$(total);
+  $('revCount').textContent = rows.length;
+  $('revClients').textContent = Object.keys(clients).length;
+  $('revMeta').textContent = 'Doanh thu FOB các đơn Operations2025 theo tháng Load Date. Chọn khách ở cột trái để xem chi tiết.';
+  var list = Object.keys(bySale).map(function (k) { return bySale[k]; }).sort(function (a, b) { return b.fob - a.fob; });
+  var tb = $('revTable').querySelector('tbody');
+  tb.innerHTML = list.length ? list.map(function (r) {
+    var pct = total > 0 ? (r.fob / total * 100) : 0;
+    return '<tr><td>' + esc(r.sale) + '</td><td class="num">' + r.count + '</td>' +
+      '<td class="num">' + fmt$(r.fob) + '</td><td class="num">' + fmtN(pct, 1) + '%</td></tr>';
+  }).join('') : '<tr><td colspan="4" style="color:var(--muted)">Không có đơn nào trong tháng ' + esc(S.revMonth) + '.</td></tr>';
+}
 
 /* ================= Hàng đợi review (technician) ================= */
 function loadReviewQueue() {
