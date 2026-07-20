@@ -703,9 +703,12 @@ function selectClient(c, targetSo) {
   gs('api_clientOrders', S.token, c.name).then(function (res) {
     S.orders = res.orders;
     var sel = $('orderSelect');
+    var canCreate0 = S.user.role !== 'technician';
+    $('createNewBtn').style.display = canCreate0 ? '' : 'none';
     if (!S.orders.length) {
       sel.innerHTML = '<option value="">(Chưa có đơn nào)</option>';
       $('editBtn').disabled = true; $('cloneBtn').disabled = true;
+      $('cloneBtn').style.display = 'none';
       return;
     }
     sel.innerHTML = S.orders.map(function (o, i) {
@@ -745,6 +748,10 @@ function selectOrder(i) {
   var editable = canEditOrder(o);
   $('editBtn').disabled = !editable;
   $('editBtn').title = editable ? '' : 'Đơn ở trạng thái này không sửa được với quyền của bạn';
+  // technician chỉ review, không được Clone/Create New
+  var canCreate = S.user.role !== 'technician';
+  $('cloneBtn').style.display = canCreate ? '' : 'none';
+  $('createNewBtn').style.display = canCreate ? '' : 'none';
   $('cloneBtn').disabled = false;
   // nút Confirm: chỉ admin, đơn file sale (New Created / Sale Edited / reviewed)
   var canConfirm = S.user.role === 'admin' && o.source === 'sale' &&
