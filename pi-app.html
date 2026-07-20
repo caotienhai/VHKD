@@ -249,6 +249,8 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
           <button class="btn" id="cloneBtn">⧉ Clone</button>
           <button class="btn primary" id="createNewBtn">+ Create New</button>
           <button class="btn" id="exportViewBtn">⬇ Export PI</button>
+          <button class="btn" id="reviewPiBtn" style="display:none" title="Xác nhận đã kiểm tra kỹ thuật (technician)">✔ Xác nhận (reviewed)</button>
+          <button class="btn" id="rdFormBtn" style="display:none" title="Xuất form Yêu cầu phát triển sản phẩm gửi R&D">⬇ Form RD</button>
           <button class="btn" id="confirmPiBtn" style="display:none" title="Chuyển đơn của sale vào Operations2025 (chỉ admin)">✔ Confirm → Operations2025</button>
         </div>
       </section>
@@ -727,18 +729,33 @@ function selectClient(c, targetSo) {
 
 $('orderSelect').addEventListener('change', function () { selectOrder(parseInt(this.value, 10)); });
 
+/** Đơn có sửa được (Edit Details) với quyền hiện tại không?
+ *  reviewed: chỉ admin & technician. Các status còn lại theo EDITABLE_STATUSES. */
+function canEditOrder(o) {
+  var st = (o.status || '').toLowerCase();
+  if (st === 'reviewed') return S.user.role === 'admin' || S.user.role === 'technician';
+  return EDITABLE_STATUSES.indexOf(st) >= 0;
+}
+
 function selectOrder(i) {
   var o = S.orders[i];
   if (!o) return;
   S.currentOrder = o;
-  var editable = EDITABLE_STATUSES.indexOf((o.status || '').toLowerCase()) >= 0;
+  var st = (o.status || '').toLowerCase();
+  var editable = canEditOrder(o);
   $('editBtn').disabled = !editable;
-  $('editBtn').title = editable ? '' : 'Chỉ sửa được đơn có status drafted/targeted';
+  $('editBtn').title = editable ? '' : 'Đơn ở trạng thái này không sửa được với quyền của bạn';
   $('cloneBtn').disabled = false;
-  // nút Confirm: chỉ admin, với đơn nằm trong file sale (New Created / Sale Edited)
+  // nút Confirm: chỉ admin, đơn file sale (New Created / Sale Edited / reviewed)
   var canConfirm = S.user.role === 'admin' && o.source === 'sale' &&
-    ['new created', 'sale edited'].indexOf((o.status || '').toLowerCase()) >= 0;
+    ['new created', 'sale edited', 'reviewed'].indexOf(st) >= 0;
   $('confirmPiBtn').style.display = canConfirm ? '' : 'none';
+  // nút review + form RD: technician, đơn file sale
+  var isSaleReviewable = o.source === 'sale' && ['new created', 'sale edited', 'reviewed'].indexOf(st) >= 0;
+  var isTech = S.user.role === 'technician';
+  $('reviewPiBtn').style.display = (isTech && isSaleReviewable) ? '' : 'none';
+  $('reviewPiBtn').textContent = st === 'reviewed' ? '✔ Đã reviewed (xác nhận lại)' : '✔ Xác nhận (reviewed)';
+  $('rdFormBtn').style.display = ((isTech || S.user.role === 'admin') && isSaleReviewable) ? '' : 'none';
   $('orderSummary').innerHTML =
     '<span>PI: <b>' + esc(o.piNumber || o.so) + '</b></span>' +
     '<span>Sale Order <b>' + esc(o.so || '—') + '</b></span>' +
@@ -1026,12 +1043,20 @@ function restoreDraft(client, ed) {
 
 /* ================= Editor (form báo giá) ================= */
 function openEditor(mode, piNumber, lines, existingOrder) {
+  // Sửa đơn đã nằm trong file sale (New Created/Sale Edited/reviewed) -> GIỮ status hiện tại
+  // (technician giữ reviewed; admin sửa reviewed vẫn reviewed). Sửa đơn ops -> 'Sale Edited'. Clone/New -> 'New Created'.
+  var editStatus;
+  if (mode === 'edit') {
+    editStatus = (existingOrder && existingOrder.source === 'sale') ? existingOrder.status : 'Sale Edited';
+  } else {
+    editStatus = 'New Created';
+  }
   S.editor = {
     mode: mode,
     piNumber: piNumber,
     piDate: new Date().toISOString().slice(0, 10),
-    status: mode === 'edit' ? 'Sale Edited' : 'New Created',
-    // admin sửa đơn của sale khác: giữ PIC gốc (server chỉ tôn trọng khi role=admin)
+    status: editStatus,
+    // admin/technician sửa đơn của sale khác: giữ PIC gốc (server chỉ tôn trọng khi role admin/technician)
     ownerPic: mode === 'edit' && existingOrder ? (existingOrder.pic || '') : '',
     lines: lines,
     discountPct: existingOrder ? 0 : 0,
@@ -1951,6 +1976,21 @@ $('exCancelBtn').addEventListener('click', function () { $('exOverlay').style.di
 $('exXlsxBtn').addEventListener('click', function () { doExport('xlsx'); });
 $('exPdfBtn').addEventListener('click', function () { doExport('pdf'); });
 
+/** Tải file từ {base64, filename, mimeType} về máy. */
+function downloadBase64(res) {
+  var bin = atob(res.base64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  var blob = new Blob([arr], { type: res.mimeType });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = res.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+}
+
 function doExport(format) {
   if (!EX) return;
   var payload = {
@@ -1971,23 +2011,38 @@ function doExport(format) {
   };
   loading(true);
   gs('api_exportPI', S.token, payload, format).then(function (res) {
-    var bin = atob(res.base64);
-    var arr = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    var blob = new Blob([arr], { type: res.mimeType });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = res.filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    downloadBase64(res);
     $('exOverlay').style.display = 'none';
     EX = null;
     toast('Đã tải ' + res.filename);
   }).catch(function (e) { toast('Lỗi export: ' + e.message); })
     .finally(function () { loading(false); });
 }
+
+/* ================= Technician: Xác nhận (reviewed) + Form RD ================= */
+$('reviewPiBtn').addEventListener('click', function () {
+  var o = S.currentOrder;
+  if (!o) return;
+  appConfirm('Xác nhận đã kiểm tra kỹ thuật đơn ' + (o.piNumber || o.so) + '? Trạng thái sẽ chuyển sang "reviewed".', function () {
+    loading(true);
+    gs('api_reviewPI', S.token, { piNumber: o.piNumber, ownerPic: o.pic || '' }).then(function () {
+      toast('Đã xác nhận reviewed.');
+      selectClient(S.currentClient);
+    }).catch(function (e) { toast('Lỗi: ' + e.message); })
+      .finally(function () { loading(false); });
+  });
+});
+
+$('rdFormBtn').addEventListener('click', function () {
+  var o = S.currentOrder;
+  if (!o) return;
+  loading(true);
+  gs('api_exportRdForm', S.token, { piNumber: o.piNumber, ownerPic: o.pic || '' }).then(function (res) {
+    downloadBase64(res);
+    toast('Đã tải ' + res.filename);
+  }).catch(function (e) { toast('Lỗi form RD: ' + e.message); })
+    .finally(function () { loading(false); });
+});
 
 /* ================= Confirm PI → Operations2025 (chỉ admin) ================= */
 $('confirmPiBtn').addEventListener('click', function () {
