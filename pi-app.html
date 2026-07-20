@@ -220,6 +220,26 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
         <p>Chọn một khách hàng để xem đơn hàng và lập báo giá.</p>
       </div>
 
+      <!-- Hàng đợi review cho technician -->
+      <section id="queueView" style="display:none">
+        <div class="client-header">
+          <div>
+            <h2>Đơn hàng cần kiểm tra</h2>
+            <div class="client-meta" id="queueMeta"></div>
+          </div>
+          <input type="search" id="queueSearch" placeholder="Lọc theo khách / PI / SO…" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;min-width:240px">
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="queueTable">
+            <thead><tr>
+              <th>Khách</th><th>PI Number</th><th>SO</th><th>Sale</th>
+              <th class="num">FOB</th><th>Ngày</th><th>Status</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Xem đơn của khách -->
       <section id="clientView" style="display:none">
         <div class="client-header">
@@ -227,6 +247,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <h2 id="cvName"></h2>
             <div class="client-meta" id="cvMeta"></div>
             <button class="btn small" id="otherClientBtn" style="margin-top:8px">⇄ Chọn khách khác</button>
+            <button class="btn small" id="backToQueueBtn" style="margin-top:8px;display:none">⟵ Danh sách cần kiểm tra</button>
           </div>
           <div class="order-picker">
             <label>Đơn hàng
@@ -622,6 +643,7 @@ function bootstrap() {
     renderPending(res.pendingProducts || []);
     var draftPrompted = checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
     if (!draftPrompted) handleDeepLink(); // có draft -> deep-link xử lý sau khi người dùng trả lời modal
+    if (!draftPrompted && !DEEP_SO && S.user.role === 'technician') loadReviewQueue(); // technician: hiện ngay hàng đợi review
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -692,6 +714,8 @@ function selectClient(c, targetSo) {
   renderClientList();
   setSidebar(false); // ẩn panel trái, bấm "Chọn khách khác" để hiện lại
   $('emptyState').style.display = 'none';
+  $('queueView').style.display = 'none';
+  $('backToQueueBtn').style.display = S.user.role === 'technician' ? '' : 'none';
   $('editorView').style.display = 'none';
   $('clientView').style.display = 'block';
   $('cvName').textContent = c.name;
@@ -731,6 +755,61 @@ function selectClient(c, targetSo) {
 }
 
 $('orderSelect').addEventListener('change', function () { selectOrder(parseInt(this.value, 10)); });
+
+/* ================= Hàng đợi review (technician) ================= */
+function loadReviewQueue() {
+  $('emptyState').style.display = 'none';
+  $('clientView').style.display = 'none';
+  $('editorView').style.display = 'none';
+  $('queueView').style.display = 'block';
+  var tb = $('queueTable').querySelector('tbody');
+  tb.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">Đang tải…</td></tr>';
+  loading(true);
+  gs('api_reviewQueue', S.token).then(function (res) {
+    S.queue = res.queue || [];
+    renderQueue();
+  }).catch(function (e) { toast('Lỗi tải hàng đợi: ' + e.message); })
+    .finally(function () { loading(false); });
+}
+
+function statusBadge(st) {
+  var s = (st || '').toLowerCase();
+  var color = s === 'reviewed' ? 'var(--accent)' : (s === 'new created' || s === 'sale edited' ? 'var(--warn)' : 'var(--muted)');
+  return '<span style="font-weight:600;color:' + color + '">' + esc(st || '—') + '</span>';
+}
+
+function renderQueue() {
+  var q = ($('queueSearch').value || '').toLowerCase();
+  var rows = S.queue.filter(function (o) {
+    return !q || (o.client + ' ' + o.piNumber + ' ' + o.so + ' ' + o.pic).toLowerCase().indexOf(q) >= 0;
+  });
+  $('queueMeta').textContent = rows.length + ' đơn (New Created / Sale Edited / reviewed / targeted / drafted)';
+  var tb = $('queueTable').querySelector('tbody');
+  tb.innerHTML = rows.length ? rows.map(function (o, i) {
+    return '<tr data-i="' + i + '" style="cursor:pointer">' +
+      '<td>' + esc(o.client) + '</td>' +
+      '<td><span class="code-chip">' + esc(o.piNumber || o.so) + '</span></td>' +
+      '<td>' + esc(o.so || '—') + '</td>' +
+      '<td>' + esc(o.pic || '—') + '</td>' +
+      '<td class="num">' + fmt$(o.fob) + '</td>' +
+      '<td>' + esc(o.piDate || '') + '</td>' +
+      '<td>' + statusBadge(o.status) + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="color:var(--muted)">Không có đơn nào cần kiểm tra.</td></tr>';
+  var filtered = rows;
+  tb.querySelectorAll('tr[data-i]').forEach(function (tr) {
+    tr.addEventListener('click', function () { openQueueRow(filtered[parseInt(tr.getAttribute('data-i'), 10)]); });
+  });
+}
+$('queueSearch').addEventListener('input', renderQueue);
+$('backToQueueBtn').addEventListener('click', loadReviewQueue);
+
+/** Mở 1 đơn từ hàng đợi: tìm khách trong danh sách rồi chọn đúng đơn theo SO/PI. */
+function openQueueRow(o) {
+  if (!o) return;
+  var client = S.clients.filter(function (c) { return c.name.toLowerCase() === String(o.client || '').toLowerCase(); })[0];
+  if (!client) { toast('Không tìm thấy khách "' + o.client + '" trong danh sách.'); return; }
+  selectClient(client, o.so || o.piNumber);
+}
 
 /** Đơn có sửa được (Edit Details) với quyền hiện tại không?
  *  reviewed: chỉ admin & technician. Các status còn lại theo EDITABLE_STATUSES. */
