@@ -224,11 +224,11 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
       <section id="revenueView" style="display:none">
         <div class="client-header">
           <div>
-            <h2>Doanh thu FOB theo tháng</h2>
+            <h2 id="revTitle">Doanh thu theo tháng</h2>
             <div class="client-meta" id="revMeta"></div>
           </div>
           <div class="order-picker" style="display:flex;align-items:center;gap:8px">
-            <label style="font-size:13px;color:var(--muted)">Gom theo
+            <label id="revGroupByWrap" style="font-size:13px;color:var(--muted)">Gom theo
               <select id="revGroupBy" style="margin-left:4px;padding:6px 8px;border:1px solid var(--line);border-radius:6px">
                 <option value="pic">Sale</option>
                 <option value="client">Khách hàng</option>
@@ -245,9 +245,18 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
           <div class="tp-cell"><div class="tp-label">Số đơn</div><div class="tp-value" id="revCount">0</div></div>
           <div class="tp-cell"><div class="tp-label">Số khách</div><div class="tp-value" id="revClients">0</div></div>
         </div>
+        <div id="revGroupedWrap">
+          <div class="table-wrap" style="margin-bottom:16px">
+            <table class="data-table" id="revTable">
+              <thead><tr><th id="revGroupHead">Sale</th><th class="num">Số đơn</th><th class="num">Tổng FOB</th><th class="num">Tỷ trọng</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="tp-label" style="margin:4px 0 6px;font-weight:600">Danh sách đơn trong tháng (bấm để xem chi tiết)</div>
         <div class="table-wrap">
-          <table class="data-table" id="revTable">
-            <thead><tr><th id="revGroupHead">Sale</th><th class="num">Số đơn</th><th class="num">Tổng FOB</th><th class="num">Tỷ trọng</th></tr></thead>
+          <table class="data-table" id="monthOrdersTable">
+            <thead><tr><th>Khách</th><th>Số PI</th><th>SO</th><th>Ngày load</th><th class="num">FOB</th><th>Status</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -678,7 +687,7 @@ function bootstrap() {
     var draftPrompted = checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
     if (!draftPrompted) handleDeepLink(); // có draft -> deep-link xử lý sau khi người dùng trả lời modal
     if (!draftPrompted && !DEEP_SO && S.user.role === 'technician') loadReviewQueue(); // technician: hiện ngay hàng đợi review
-    if (!draftPrompted && !DEEP_SO && S.user.role === 'lead') loadRevenue(); // lead: hiện ngay dashboard doanh thu
+    if (!draftPrompted && !DEEP_SO && (S.user.role === 'lead' || S.user.role === 'sale')) loadRevenue(); // lead/sale: hiện ngay đơn theo tháng
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -752,7 +761,8 @@ function selectClient(c, targetSo) {
   $('queueView').style.display = 'none';
   $('revenueView').style.display = 'none';
   $('backToQueueBtn').style.display = S.user.role === 'technician' ? '' : 'none';
-  $('backToRevenueBtn').style.display = S.user.role === 'lead' ? '' : 'none';
+  $('backToRevenueBtn').style.display = (S.user.role === 'lead' || S.user.role === 'sale') ? '' : 'none';
+  $('backToRevenueBtn').textContent = S.user.role === 'sale' ? '⟵ Đơn theo tháng' : '⟵ Doanh thu theo tháng';
   $('editorView').style.display = 'none';
   $('clientView').style.display = 'block';
   $('cvName').textContent = c.name;
@@ -795,12 +805,17 @@ $('orderSelect').addEventListener('change', function () { selectOrder(parseInt(t
 
 /* ================= Dashboard doanh thu FOB (lead) ================= */
 function loadRevenue() {
-  setSidebar(true); // luôn hiện panel khách để lead chọn khách khi đang xem doanh thu
+  setSidebar(true); // luôn hiện panel khách để chọn khách khi đang xem theo tháng
   $('emptyState').style.display = 'none';
   $('clientView').style.display = 'none';
   $('editorView').style.display = 'none';
   $('queueView').style.display = 'none';
   $('revenueView').style.display = 'block';
+  var isLead = S.user.role === 'lead' || S.user.role === 'admin';
+  // sale: ẩn phần gom nhóm (chỉ xem danh sách đơn của mình); lead/admin: đủ dashboard
+  $('revGroupByWrap').style.display = isLead ? '' : 'none';
+  $('revGroupedWrap').style.display = isLead ? '' : 'none';
+  $('revTitle').textContent = isLead ? 'Doanh thu theo tháng' : 'Đơn hàng của tôi theo tháng';
   if (!S.revMonth) S.revMonth = new Date().toISOString().slice(0, 7); // yyyy-MM hiện tại
   if (S.revOrders) { renderRevenue(); return; }
   $('revTable').querySelector('tbody').innerHTML = '<tr><td colspan="4" style="color:var(--muted)">Đang tải…</td></tr>';
@@ -857,6 +872,22 @@ function renderRevenue() {
     return '<tr><td>' + esc(r.name) + '</td><td class="num">' + r.count + '</td>' +
       '<td class="num">' + fmt$(r.fob) + '</td><td class="num">' + fmtN(pct, 1) + '%</td></tr>';
   }).join('') : '<tr><td colspan="4" style="color:var(--muted)">Không có đơn nào trong tháng ' + esc(S.revMonth) + '.</td></tr>';
+
+  // danh sách đơn trong tháng (bấm để xem chi tiết) — sắp theo ngày load mới nhất
+  var ord = rows.slice().sort(function (a, b) { return String(b.realLoad || b.piDate).localeCompare(String(a.realLoad || a.piDate)); });
+  var mtb = $('monthOrdersTable').querySelector('tbody');
+  mtb.innerHTML = ord.length ? ord.map(function (o, i) {
+    return '<tr data-i="' + i + '" style="cursor:pointer">' +
+      '<td>' + esc(o.client) + '</td>' +
+      '<td><span class="code-chip">' + esc(o.piNumber || o.so) + '</span></td>' +
+      '<td>' + esc(o.so || '—') + '</td>' +
+      '<td>' + esc(o.realLoad || '—') + '</td>' +
+      '<td class="num">' + fmt$(o.fob) + '</td>' +
+      '<td>' + statusBadge(o.status) + '</td></tr>';
+  }).join('') : '<tr><td colspan="6" style="color:var(--muted)">Không có đơn nào trong tháng ' + esc(S.revMonth) + '.</td></tr>';
+  mtb.querySelectorAll('tr[data-i]').forEach(function (tr) {
+    tr.addEventListener('click', function () { openQueueRow(ord[parseInt(tr.getAttribute('data-i'), 10)]); });
+  });
 }
 
 /* ================= Hàng đợi review (technician) ================= */
