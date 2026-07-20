@@ -228,6 +228,13 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <div class="client-meta" id="revMeta"></div>
           </div>
           <div class="order-picker" style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:13px;color:var(--muted)">Gom theo
+              <select id="revGroupBy" style="margin-left:4px;padding:6px 8px;border:1px solid var(--line);border-radius:6px">
+                <option value="pic">Sale</option>
+                <option value="client">Khách hàng</option>
+                <option value="market">Thị trường</option>
+              </select>
+            </label>
             <button class="btn small" id="revPrev">◀</button>
             <b id="revMonthLabel" style="min-width:90px;text-align:center"></b>
             <button class="btn small" id="revNext">▶</button>
@@ -240,7 +247,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
         </div>
         <div class="table-wrap">
           <table class="data-table" id="revTable">
-            <thead><tr><th>Sale</th><th class="num">Số đơn</th><th class="num">Tổng FOB</th><th class="num">Tỷ trọng</th></tr></thead>
+            <thead><tr><th id="revGroupHead">Sale</th><th class="num">Số đơn</th><th class="num">Tổng FOB</th><th class="num">Tỷ trọng</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -788,6 +795,7 @@ $('orderSelect').addEventListener('change', function () { selectOrder(parseInt(t
 
 /* ================= Dashboard doanh thu FOB (lead) ================= */
 function loadRevenue() {
+  setSidebar(true); // luôn hiện panel khách để lead chọn khách khi đang xem doanh thu
   $('emptyState').style.display = 'none';
   $('clientView').style.display = 'none';
   $('editorView').style.display = 'none';
@@ -812,34 +820,48 @@ function shiftRevMonth(delta) {
 }
 $('revPrev').addEventListener('click', function () { shiftRevMonth(-1); });
 $('revNext').addEventListener('click', function () { shiftRevMonth(1); });
+$('revGroupBy').addEventListener('change', renderRevenue);
 $('backToRevenueBtn').addEventListener('click', loadRevenue);
+
+/** Bản đồ tên khách (lowercase) -> quốc gia, để gom theo thị trường. */
+function clientCountry(name) {
+  if (!S._countryMap) {
+    S._countryMap = {};
+    (S.clients || []).forEach(function (c) { S._countryMap[c.name.toLowerCase()] = c.country || ''; });
+  }
+  return S._countryMap[String(name || '').toLowerCase()] || '(không rõ)';
+}
 
 function renderRevenue() {
   $('revMonthLabel').textContent = S.revMonth;
+  var groupBy = $('revGroupBy').value; // pic | client | market
+  $('revGroupHead').textContent = groupBy === 'client' ? 'Khách hàng' : (groupBy === 'market' ? 'Thị trường' : 'Sale');
   var rows = (S.revOrders || []).filter(function (o) { return o.monthKey === S.revMonth; });
-  var total = 0, bySale = {}, clients = {};
+  var total = 0, groups = {}, clients = {};
   rows.forEach(function (o) {
     var fob = Number(o.fob) || 0; total += fob;
-    var s = o.pic || '(không rõ)';
-    if (!bySale[s]) bySale[s] = { sale: s, count: 0, fob: 0 };
-    bySale[s].count++; bySale[s].fob += fob;
+    var key = groupBy === 'client' ? (o.client || '(không rõ)')
+      : (groupBy === 'market' ? clientCountry(o.client) : (o.pic || '(không rõ)'));
+    if (!groups[key]) groups[key] = { name: key, count: 0, fob: 0 };
+    groups[key].count++; groups[key].fob += fob;
     if (o.client) clients[o.client.toLowerCase()] = 1;
   });
   $('revTotal').textContent = fmt$(total);
   $('revCount').textContent = rows.length;
   $('revClients').textContent = Object.keys(clients).length;
   $('revMeta').textContent = 'Doanh thu FOB các đơn Operations2025 theo tháng Load Date. Chọn khách ở cột trái để xem chi tiết.';
-  var list = Object.keys(bySale).map(function (k) { return bySale[k]; }).sort(function (a, b) { return b.fob - a.fob; });
+  var list = Object.keys(groups).map(function (k) { return groups[k]; }).sort(function (a, b) { return b.fob - a.fob; });
   var tb = $('revTable').querySelector('tbody');
   tb.innerHTML = list.length ? list.map(function (r) {
     var pct = total > 0 ? (r.fob / total * 100) : 0;
-    return '<tr><td>' + esc(r.sale) + '</td><td class="num">' + r.count + '</td>' +
+    return '<tr><td>' + esc(r.name) + '</td><td class="num">' + r.count + '</td>' +
       '<td class="num">' + fmt$(r.fob) + '</td><td class="num">' + fmtN(pct, 1) + '%</td></tr>';
   }).join('') : '<tr><td colspan="4" style="color:var(--muted)">Không có đơn nào trong tháng ' + esc(S.revMonth) + '.</td></tr>';
 }
 
 /* ================= Hàng đợi review (technician) ================= */
 function loadReviewQueue() {
+  setSidebar(true); // giữ panel khách bên trái
   $('emptyState').style.display = 'none';
   $('clientView').style.display = 'none';
   $('editorView').style.display = 'none';
