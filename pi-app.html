@@ -324,7 +324,10 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
       <section id="editorView" style="display:none">
         <div class="editor-header">
           <div class="editor-fields">
-            <label>Khách <input type="text" id="edClient" readonly></label>
+            <label>Khách
+              <input type="text" id="edClient" readonly>
+              <select id="edClientSelect" style="display:none;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px"></select>
+            </label>
             <label id="edClientCodeWrap" style="display:none">Mã KH <input type="text" id="edClientCode" placeholder="Client_ID"></label>
             <label>PI Number <input type="text" id="edPiNumber"></label>
             <label>PI Date <input type="date" id="edPiDate"></label>
@@ -1286,6 +1289,7 @@ function openEditor(mode, piNumber, lines, existingOrder) {
     status: editStatus,
     // admin/technician sửa đơn của sale khác: giữ PIC gốc (server chỉ tôn trọng khi role admin/technician)
     ownerPic: mode === 'edit' && existingOrder ? (existingOrder.pic || '') : '',
+    clientObj: S.currentClient, // khách của đơn đang soạn (Clone có thể đổi)
     lines: lines,
     discountPct: existingOrder ? 0 : 0,
     discountVal: existingOrder ? (existingOrder.discount || 0) : 0,
@@ -1294,7 +1298,16 @@ function openEditor(mode, piNumber, lines, existingOrder) {
   if (S.editor.discountVal) syncDiscountFromVal();
   $('clientView').style.display = 'none';
   $('editorView').style.display = 'block';
+  // Clone: cho phép chọn khách khác cho đơn mới; các mode khác: khóa theo khách hiện tại
+  var allowPickClient = (mode === 'clone');
+  $('edClient').style.display = allowPickClient ? 'none' : '';
+  $('edClientSelect').style.display = allowPickClient ? '' : 'none';
   $('edClient').value = S.currentClient.name;
+  if (allowPickClient) {
+    $('edClientSelect').innerHTML = S.clients.map(function (c) {
+      return '<option value="' + esc(c.name) + '"' + (c.name === S.currentClient.name ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+    }).join('');
+  }
   // admin/master: ô Mã KH (Client_ID) để cập nhật/bổ sung khi sửa đơn
   $('edClientCodeWrap').style.display = isAdminLevel() ? '' : 'none';
   $('edClientCode').value = S.currentClient.id || '';
@@ -1466,6 +1479,16 @@ $('tOther').addEventListener('change', function () {
 });
 $('edPiNumber').addEventListener('change', saveDraft);
 $('edPiDate').addEventListener('change', saveDraft);
+// Clone: đổi khách cho đơn mới -> cập nhật clientObj, gợi ý lại số PI + mã KH theo khách mới
+$('edClientSelect').addEventListener('change', function () {
+  var name = this.value;
+  var c = S.clients.filter(function (x) { return x.name === name; })[0];
+  if (!c) return;
+  S.editor.clientObj = c;
+  $('edClientCode').value = c.id || '';
+  $('edPiNumber').value = c.name.replace(/\s+/g, '') + '01'; // gợi ý; sale sửa lại được
+  saveDraft();
+});
 
 $('addLineBtn').addEventListener('click', function () {
   S.editor.lines.push(makeLine('', '', '', 0, 0, 0, 0, 0, 0));
@@ -1497,10 +1520,11 @@ $('edSaveBtn').addEventListener('click', function () {
   var lines = ed.lines.filter(function (l) { return l.code && l.qty > 0; });
   if (!lines.length) { toast('Đơn chưa có dòng nào (cần Code + Qty > 0).'); return; }
   var grand = ed.subtotal - (ed.discountVal || 0) + (ed.other || 0);
+  var clientObj = ed.clientObj || S.currentClient; // Clone có thể đã đổi khách
   var payload = {
     piNumber: ed.piNumber,
     piDate: ed.piDate,
-    client: S.currentClient.name,
+    client: clientObj.name,
     status: ed.status,
     ownerPic: ed.ownerPic || '',
     clientCode: isAdminLevel() ? $('edClientCode').value.trim() : '', // admin/master cập nhật mã KH vào hub Clients
@@ -1515,10 +1539,11 @@ $('edSaveBtn').addEventListener('click', function () {
   loading(true);
   gs('api_savePI', S.token, payload).then(function (res) {
     clearDraft(); // đã lưu chính thức -> bỏ bản nháp tự lưu
-    if (payload.clientCode) S.currentClient.id = payload.clientCode; // phản ánh mã KH mới ngay
-    toast('Đã lưu PI ' + res.piNumber + ' vào ' + res.savedTo + ' (status: ' + ed.status + ').');
+    if (payload.clientCode) clientObj.id = payload.clientCode; // phản ánh mã KH mới ngay
+    toast('Đã lưu PI ' + res.piNumber + ' cho khách ' + clientObj.name + ' (' + ed.status + ').');
     $('editorView').style.display = 'none';
-    selectClient(S.currentClient); // reload danh sách đơn
+    S.currentClient = clientObj; // chuyển ngữ cảnh sang khách của đơn vừa lưu
+    selectClient(clientObj); // reload danh sách đơn của khách đó
   }).catch(function (e) { toast('Lỗi khi lưu: ' + e.message); })
     .finally(function () { loading(false); });
 });
@@ -2147,9 +2172,9 @@ function openExport(base) {
   EX = base;
   $('exPiNo').textContent = base.piNumber;
   $('exLoad').value = base.expectedLoad || '';
-  $('exTerms').value = ((S.currentClient.incoterm || 'FOB') + ' INCOTERMS 2010');
+  $('exTerms').value = (((base.incoterm || S.currentClient.incoterm) || 'FOB') + ' INCOTERMS 2010');
   $('exPol').value = 'HAI PHONG PORT';
-  $('exPod').value = S.currentClient.port || '';
+  $('exPod').value = (base.port != null ? base.port : (S.currentClient.port || ''));
   $('exPayBy').value = 'TTR';
   $('exPayTerms').value = '30% TTR in advance, the balance by TTR against BL copy.';
   $('exPacking').value = '';
@@ -2186,12 +2211,15 @@ $('exportEditBtn').addEventListener('click', function () {
   if (!ed) return;
   var lines = ed.lines.filter(function (l) { return l.code && Number(l.qty) > 0; });
   if (!lines.length) { toast('Đơn chưa có dòng nào (cần Code + Qty > 0).'); return; }
+  var eco = ed.clientObj || S.currentClient; // khách của đơn (Clone có thể đã đổi)
   openExport({
     piNumber: $('edPiNumber').value.trim() || ed.piNumber,
     piDate: $('edPiDate').value,
     expectedLoad: '',
-    client: S.currentClient.name,
-    buyerAddress: S.currentClient.address || '',
+    client: eco.name,
+    buyerAddress: eco.address || '',
+    incoterm: eco.incoterm || '',
+    port: eco.port || '',
     discount: ed.discountVal || 0,
     other: ed.other || 0,
     lines: lines.map(function (l) {
