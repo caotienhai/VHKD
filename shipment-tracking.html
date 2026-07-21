@@ -237,6 +237,14 @@
 const GATE_KEY = 'shptrack_gate_ok_v1';
 const GATE_HASH = '78817b2b662a2ee2abfdc02a9cc407fdb5468138cc1bd15f64667ac2494242f9';
 
+// Phiên đăng nhập chung với pi-app (cùng origin). Sale/lead đã đăng nhập -> xem không cần mật khẩu.
+// Chỉ admin/master mới được sửa (read-only với vai trò khác).
+function stReadSession(){
+  try{ var s = JSON.parse(localStorage.getItem('exportops_session')||'null'); return (s && s.user) ? s.user : null; }catch(e){ return null; }
+}
+var ST_SESSION = stReadSession();
+var CAN_EDIT = !!(ST_SESSION && (ST_SESSION.role === 'admin' || ST_SESSION.role === 'master'));
+
 async function sha256Hex(text){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -254,7 +262,9 @@ async function tryGateSubmit(){
   if(hex === GATE_HASH){
     try{ localStorage.setItem(GATE_KEY, '1'); }catch(e){}
     errEl.textContent = '';
+    CAN_EDIT = true; // nhập đúng mật khẩu = admin -> cho sửa
     hideGate();
+    if(window.allRows) renderForSelectedMonth();
   }else{
     errEl.textContent = 'Sai mật khẩu, thử lại.';
     input.value = '';
@@ -263,14 +273,24 @@ async function tryGateSubmit(){
 }
 
 (function initGate(){
+  // Có phiên đăng nhập pi-app (sale/lead/admin) -> xem thẳng, không cần mật khẩu.
+  if(ST_SESSION){ hideGate(); applyEditPermission(); return; }
   let passed = false;
   try{ passed = localStorage.getItem(GATE_KEY) === '1'; }catch(e){}
-  if(passed){ hideGate(); } else { showGate(); }
+  if(passed){ CAN_EDIT = true; hideGate(); } else { showGate(); }
   document.getElementById('gateSubmit').addEventListener('click', tryGateSubmit);
   document.getElementById('gateInput').addEventListener('keydown', (e)=>{
     if(e.key === 'Enter') tryGateSubmit();
   });
 })();
+
+/** Ẩn các nút chỉ dành cho người sửa khi ở chế độ chỉ-xem. */
+function applyEditPermission(){
+  var ui = document.getElementById('updateInfoBtn');
+  if(ui) ui.style.display = CAN_EDIT ? '' : 'none';
+  var banner = document.querySelector('.note-banner');
+  if(banner && !CAN_EDIT) banner.textContent = 'Chế độ chỉ xem. Chỉ admin mới cập nhật được lịch trình. Double-click số SO để mở đơn bên PI-app.';
+}
 
 const SHEET_ID = '1oWF0WMkGAXHBrZ0l52qDJZHWuLHRMx-Yg0lk3BiuW-c';
 const GAS_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz7CwVNQ8xd0WXs8pvVuqMLfhSk2NPLkJfqIQwLmR0bknTTFbfx_TXEddWEaGIVmQAt/exec';
@@ -468,6 +488,7 @@ function effectiveEtd(r){
 
 function renderLoadDateCell(tdLoad, r){
   const d = effectiveLoadDate(r);
+  if(!CAN_EDIT){ tdLoad.innerHTML = `<span class="mono">${d ? fmtDate(d) : '—'}</span>`; return; }
   tdLoad.innerHTML = `<span class="mono editable">${d ? fmtDate(d) : '— chọn ngày'}</span>`;
   tdLoad.querySelector('span').onclick = ()=>enterLoadDateEdit(tdLoad, r);
 }
@@ -487,6 +508,7 @@ function enterLoadDateEdit(tdLoad, r){
 }
 
 function renderStatusCell(tdStatus, r){
+  if(!CAN_EDIT){ tdStatus.innerHTML = `<span class="status-pill ${statusClass(r.status)}">${r.status ? escapeHtml(r.status) : '—'}</span>`; return; }
   tdStatus.innerHTML = `<span class="status-pill editable ${statusClass(r.status)}">${r.status ? escapeHtml(r.status) : '— chọn'}</span>`;
   tdStatus.querySelector('span').onclick = ()=>enterStatusEdit(tdStatus, r);
 }
@@ -641,17 +663,31 @@ function renderRow(r){
 function renderActionCell(tdAction, r, tdBooking, tdLine, tdTrack){
   tdAction.innerHTML = '';
   const hasBoth = r.booking && r.line;
-  const btn = document.createElement('button');
   if(hasBoth){
+    const btn = document.createElement('button');
     btn.className = 'btn-track';
     btn.textContent = 'Tracking';
-    btn.onclick = ()=>openTracking(r, tdBooking, tdLine, tdTrack, tdAction);
-  }else{
+    // admin: mở link + cho sửa ETD/ETA; vai trò khác: chỉ mở link tra cứu
+    btn.onclick = CAN_EDIT
+      ? ()=>openTracking(r, tdBooking, tdLine, tdTrack, tdAction)
+      : ()=>openTrackingLink(r);
+    tdAction.appendChild(btn);
+  }else if(CAN_EDIT){
+    const btn = document.createElement('button');
     btn.className = 'btn-update';
     btn.textContent = 'Update';
     btn.onclick = ()=>enterEditMode(r, tdBooking, tdLine, tdTrack, tdAction);
+    tdAction.appendChild(btn);
   }
-  tdAction.appendChild(btn);
+}
+
+/** Chỉ mở link tra cứu vận đơn theo hãng tàu (read-only). */
+function openTrackingLink(r){
+  var bookingNumbers = (r.booking||'').split('&').map(function(s){return s.trim();}).filter(Boolean);
+  var carrier = findCarrier(r.line);
+  if(!carrier || !bookingNumbers.length){ toast('Chưa đủ thông tin hãng tàu/booking để tra cứu.'); return; }
+  var win = window.open(carrier.url(bookingNumbers[0]), '_blank', 'noopener');
+  if(!win) toast('Trình duyệt chặn pop-up — cho phép rồi bấm lại Tracking.');
 }
 
 function carrierSelectOptions(selectedAlias){
@@ -722,6 +758,7 @@ function effectiveEta(r){
 
 function renderTrackCell(tdTrack, r, opts){
   opts = opts || {};
+  if(!CAN_EDIT) return renderTrackCellReadOnly(tdTrack, r);
   const etd = effectiveEtd(r);
   const eta = effectiveEta(r);
   const hasAny = etd || eta;
@@ -764,6 +801,28 @@ function renderTrackCell(tdTrack, r, opts){
     editLink.onclick = (e)=>{ e.preventDefault(); renderTrackCell(tdTrack, r, {showForm:true}); };
     tdTrack.appendChild(editLink);
   }
+}
+
+/** Timeline ETD/ETA chỉ-xem (không có ô sửa, không onclick). */
+function renderTrackCellReadOnly(tdTrack, r){
+  const etd = effectiveEtd(r), eta = effectiveEta(r);
+  const hasAny = etd || eta;
+  const stage = computeStage(etd, eta);
+  if(!hasAny){ tdTrack.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">—</span>'; tdTrack.dataset.ok = '0'; return; }
+  const midClass = stage === 'arrived' ? 'done' : (stage === 'in_transit' ? 'active' : '');
+  const endClass = stage === 'arrived' ? 'done' : '';
+  tdTrack.innerHTML = `
+    <div class="timeline">
+      <div class="tl-row">
+        <div class="tl-pt"><div class="tl-dot done"></div></div>
+        <div class="tl-line ${stage!=='not_started'?'done':''}"></div>
+        <div class="tl-pt"><div class="tl-dot ${midClass}"></div></div>
+        <div class="tl-line ${stage==='arrived'?'done':''}"></div>
+        <div class="tl-pt"><div class="tl-dot ${endClass}"></div></div>
+      </div>
+      <div class="tl-labels"><div>${etd?fmtDate(etd):'—'}</div><div>In transit</div><div>${eta?fmtDate(eta):'—'}</div></div>
+    </div>`;
+  tdTrack.dataset.ok = '1';
 }
 
 function appendDateEditForm(tdTrack, r){
