@@ -291,6 +291,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <button class="btn small" id="otherClientBtn" style="margin-top:8px">⇄ Chọn khách khác</button>
             <button class="btn small" id="backToQueueBtn" style="margin-top:8px;display:none">⟵ Danh sách cần kiểm tra</button>
             <button class="btn small" id="backToRevenueBtn" style="margin-top:8px;display:none">⟵ Doanh thu theo tháng</button>
+            <button class="btn small" id="reqClientCodeBtn" style="margin-top:8px;display:none" title="Khách chưa có mã — xuất form yêu cầu cấp mã KH">⬇ YC tạo mã KH</button>
           </div>
           <div class="order-picker">
             <label>Đơn hàng
@@ -324,6 +325,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
         <div class="editor-header">
           <div class="editor-fields">
             <label>Khách <input type="text" id="edClient" readonly></label>
+            <label id="edClientCodeWrap" style="display:none">Mã KH <input type="text" id="edClientCode" placeholder="Client_ID"></label>
             <label>PI Number <input type="text" id="edPiNumber"></label>
             <label>PI Date <input type="date" id="edPiDate"></label>
             <span class="status-badge" id="edStatus"></span>
@@ -629,6 +631,9 @@ gs('api_userNames').then(function (res) {
 $('loginBtn').addEventListener('click', doLogin);
 $('loginPin').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
+/** Quyền cấp quản trị (admin + master). */
+function isAdminLevel() { return S.user && (S.user.role === 'admin' || S.user.role === 'master'); }
+
 /** Rút gọn userAgent thành "Trình duyệt / HĐH" cho cột Device trong ActivityLogs. */
 function shortUA() {
   var ua = navigator.userAgent;
@@ -687,7 +692,7 @@ function bootstrap() {
     var draftPrompted = checkDraft(); // hỏi khôi phục bản nháp chưa lưu (chỉ 1 lần mỗi phiên)
     if (!draftPrompted) handleDeepLink(); // có draft -> deep-link xử lý sau khi người dùng trả lời modal
     if (!draftPrompted && !DEEP_SO && S.user.role === 'technician') loadReviewQueue(); // technician: hiện ngay hàng đợi review
-    if (!draftPrompted && !DEEP_SO && (S.user.role === 'lead' || S.user.role === 'sale')) loadRevenue(); // lead/sale: hiện ngay đơn theo tháng
+    if (!draftPrompted && !DEEP_SO && (S.user.role === 'lead' || S.user.role === 'sale' || S.user.role === 'master')) loadRevenue(); // lead/sale/master: hiện ngay đơn theo tháng
     // nạp trước catalog sản phẩm (nền); xong thì vẽ lại bảng chi tiết nếu đang mở (để điền %LN)
     gs('api_products', S.token).then(function (r) {
       S.products = r.products;
@@ -761,12 +766,14 @@ function selectClient(c, targetSo) {
   $('queueView').style.display = 'none';
   $('revenueView').style.display = 'none';
   $('backToQueueBtn').style.display = S.user.role === 'technician' ? '' : 'none';
-  $('backToRevenueBtn').style.display = (S.user.role === 'lead' || S.user.role === 'sale') ? '' : 'none';
+  $('backToRevenueBtn').style.display = (S.user.role === 'lead' || S.user.role === 'sale' || S.user.role === 'master') ? '' : 'none';
   $('backToRevenueBtn').textContent = S.user.role === 'sale' ? '⟵ Đơn theo tháng' : '⟵ Doanh thu theo tháng';
   $('editorView').style.display = 'none';
   $('clientView').style.display = 'block';
   $('cvName').textContent = c.name;
-  $('cvMeta').textContent = [c.country, c.port && ('Cảng: ' + c.port), c.incoterm, c.saleId && ('Sale: ' + c.saleId)].filter(Boolean).join(' · ');
+  $('cvMeta').textContent = ['Mã KH: ' + (c.id || '(chưa có)'), c.country, c.port && ('Cảng: ' + c.port), c.incoterm, c.saleId && ('Sale: ' + c.saleId)].filter(Boolean).join(' · ');
+  // admin/master: khách chưa có mã -> hiện nút xuất form YC cấp mã KH
+  $('reqClientCodeBtn').style.display = (isAdminLevel() && !c.id) ? '' : 'none';
   $('orderSelect').innerHTML = '<option>Đang tải…</option>';
   $('orderDetailTable').querySelector('tbody').innerHTML = '';
   $('orderSummary').innerHTML = '';
@@ -811,7 +818,7 @@ function loadRevenue() {
   $('editorView').style.display = 'none';
   $('queueView').style.display = 'none';
   $('revenueView').style.display = 'block';
-  var isLead = S.user.role === 'lead' || S.user.role === 'admin';
+  var isLead = S.user.role === 'lead' || S.user.role === 'admin' || S.user.role === 'master';
   // sale: ẩn phần gom nhóm (chỉ xem danh sách đơn của mình); lead/admin: đủ dashboard
   $('revGroupByWrap').style.display = isLead ? '' : 'none';
   $('revGroupedWrap').style.display = isLead ? '' : 'none';
@@ -950,7 +957,7 @@ function openQueueRow(o) {
  *  reviewed: chỉ admin & technician. Các status còn lại theo EDITABLE_STATUSES. */
 function canEditOrder(o) {
   var st = (o.status || '').toLowerCase();
-  if (st === 'reviewed') return S.user.role === 'admin' || S.user.role === 'technician';
+  if (st === 'reviewed') return isAdminLevel() || S.user.role === 'technician';
   return EDITABLE_STATUSES.indexOf(st) >= 0;
 }
 
@@ -968,7 +975,7 @@ function selectOrder(i) {
   $('createNewBtn').style.display = canCreate ? '' : 'none';
   $('cloneBtn').disabled = false;
   // nút Confirm: chỉ admin, đơn file sale (New Created / Sale Edited / reviewed)
-  var canConfirm = S.user.role === 'admin' && o.source === 'sale' &&
+  var canConfirm = isAdminLevel() && o.source === 'sale' &&
     ['new created', 'sale edited', 'reviewed'].indexOf(st) >= 0;
   $('confirmPiBtn').style.display = canConfirm ? '' : 'none';
   // nút review + form RD: technician, đơn file sale
@@ -976,7 +983,7 @@ function selectOrder(i) {
   var isTech = S.user.role === 'technician';
   $('reviewPiBtn').style.display = (isTech && isSaleReviewable) ? '' : 'none';
   $('reviewPiBtn').textContent = st === 'reviewed' ? '✔ Đã reviewed (xác nhận lại)' : '✔ Xác nhận (reviewed)';
-  $('rdFormBtn').style.display = ((isTech || S.user.role === 'admin') && isSaleReviewable) ? '' : 'none';
+  $('rdFormBtn').style.display = ((isTech || isAdminLevel()) && isSaleReviewable) ? '' : 'none';
   $('orderSummary').innerHTML =
     '<span>PI: <b>' + esc(o.piNumber || o.so) + '</b></span>' +
     '<span>Sale Order <b>' + esc(o.so || '—') + '</b></span>' +
@@ -1288,6 +1295,9 @@ function openEditor(mode, piNumber, lines, existingOrder) {
   $('clientView').style.display = 'none';
   $('editorView').style.display = 'block';
   $('edClient').value = S.currentClient.name;
+  // admin/master: ô Mã KH (Client_ID) để cập nhật/bổ sung khi sửa đơn
+  $('edClientCodeWrap').style.display = isAdminLevel() ? '' : 'none';
+  $('edClientCode').value = S.currentClient.id || '';
   $('edPiNumber').value = piNumber;
   $('edPiDate').value = S.editor.piDate;
   $('edStatus').textContent = S.editor.status;
@@ -1493,6 +1503,7 @@ $('edSaveBtn').addEventListener('click', function () {
     client: S.currentClient.name,
     status: ed.status,
     ownerPic: ed.ownerPic || '',
+    clientCode: isAdminLevel() ? $('edClientCode').value.trim() : '', // admin/master cập nhật mã KH vào hub Clients
     fob: Math.round(grand * 100) / 100,
     discount: ed.discountVal || 0,
     freight: ed.other || 0,
@@ -1504,6 +1515,7 @@ $('edSaveBtn').addEventListener('click', function () {
   loading(true);
   gs('api_savePI', S.token, payload).then(function (res) {
     clearDraft(); // đã lưu chính thức -> bỏ bản nháp tự lưu
+    if (payload.clientCode) S.currentClient.id = payload.clientCode; // phản ánh mã KH mới ngay
     toast('Đã lưu PI ' + res.piNumber + ' vào ' + res.savedTo + ' (status: ' + ed.status + ').');
     $('editorView').style.display = 'none';
     selectClient(S.currentClient); // reload danh sách đơn
@@ -2262,6 +2274,16 @@ $('rdFormBtn').addEventListener('click', function () {
     downloadBase64(res);
     toast('Đã tải ' + res.filename);
   }).catch(function (e) { toast('Lỗi form RD: ' + e.message); })
+    .finally(function () { loading(false); });
+});
+
+$('reqClientCodeBtn').addEventListener('click', function () {
+  if (!S.currentClient) return;
+  loading(true);
+  gs('api_exportClientForm', S.token, S.currentClient.name).then(function (res) {
+    downloadBase64(res);
+    toast('Đã tải ' + res.filename);
+  }).catch(function (e) { toast('Lỗi form mã KH: ' + e.message); })
     .finally(function () { loading(false); });
 });
 
