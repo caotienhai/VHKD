@@ -317,6 +317,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
           <button class="btn" id="reviewPiBtn" style="display:none" title="Xác nhận đã kiểm tra kỹ thuật (technician)">✔ Xác nhận (reviewed)</button>
           <button class="btn" id="rdFormBtn" style="display:none" title="Xuất form Yêu cầu phát triển sản phẩm gửi R&D">⬇ Form RD</button>
           <button class="btn" id="confirmPiBtn" style="display:none" title="Chuyển đơn của sale vào Operations2025 (chỉ admin)">✔ Confirm → Operations2025</button>
+          <button class="btn danger" id="deletePiBtn" style="display:none" title="Xóa hẳn PI (chỉ đơn targeted)">🗑 Xóa PI</button>
         </div>
       </section>
 
@@ -331,7 +332,13 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <label id="edClientCodeWrap" style="display:none">Mã KH <input type="text" id="edClientCode" placeholder="Client_ID"></label>
             <label>PI Number <input type="text" id="edPiNumber"></label>
             <label>PI Date <input type="date" id="edPiDate"></label>
-            <span class="status-badge" id="edStatus"></span>
+            <label>Expected Loading <input type="date" id="edLoadDate"></label>
+            <label>Trạng thái
+              <select id="edStatusSel" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+                <option value="targeted">targeted</option>
+                <option value="drafted">drafted</option>
+              </select>
+            </label>
           </div>
           <div class="editor-actions">
             <button class="btn ghost" id="edCancelBtn">Hủy</button>
@@ -977,16 +984,21 @@ function selectOrder(i) {
   $('cloneBtn').style.display = canCreate ? '' : 'none';
   $('createNewBtn').style.display = canCreate ? '' : 'none';
   $('cloneBtn').disabled = false;
-  // nút Confirm: chỉ admin, đơn file sale (New Created / Sale Edited / reviewed)
-  var canConfirm = isAdminLevel() && o.source === 'sale' &&
-    ['new created', 'sale edited', 'reviewed'].indexOf(st) >= 0;
-  $('confirmPiBtn').style.display = canConfirm ? '' : 'none';
-  // nút review + form RD: technician, đơn file sale
-  var isSaleReviewable = o.source === 'sale' && ['new created', 'sale edited', 'reviewed'].indexOf(st) >= 0;
+  // đơn nằm trong file sale (mọi status chờ xử lý)
+  var SALE_STATUSES = ['new created', 'sale edited', 'reviewed', 'targeted', 'drafted'];
+  var isSalePi = o.source === 'sale' && SALE_STATUSES.indexOf(st) >= 0;
+  // nút Confirm: admin/master, đơn file sale
+  $('confirmPiBtn').style.display = (isAdminLevel() && isSalePi) ? '' : 'none';
+  // nút review + form RD: technician
   var isTech = S.user.role === 'technician';
-  $('reviewPiBtn').style.display = (isTech && isSaleReviewable) ? '' : 'none';
+  $('reviewPiBtn').style.display = (isTech && isSalePi) ? '' : 'none';
   $('reviewPiBtn').textContent = st === 'reviewed' ? '✔ Đã reviewed (xác nhận lại)' : '✔ Xác nhận (reviewed)';
-  $('rdFormBtn').style.display = ((isTech || isAdminLevel()) && isSaleReviewable) ? '' : 'none';
+  $('rdFormBtn').style.display = ((isTech || isAdminLevel()) && isSalePi) ? '' : 'none';
+  // Xóa PI: đơn sale status targeted, cho sale (chủ đơn) / lead / admin-master
+  var canDelete = o.source === 'sale' && st === 'targeted' &&
+    (S.user.role === 'lead' || isAdminLevel() ||
+      (S.user.role === 'sale' && String(o.pic || '').toLowerCase() === S.user.name.toLowerCase()));
+  $('deletePiBtn').style.display = canDelete ? '' : 'none';
   $('orderSummary').innerHTML =
     '<span>PI: <b>' + esc(o.piNumber || o.so) + '</b></span>' +
     '<span>Sale Order <b>' + esc(o.so || '—') + '</b></span>' +
@@ -1157,7 +1169,8 @@ function saveDraft() {
           mode: S.editor.mode,
           piNumber: $('edPiNumber').value.trim() || S.editor.piNumber,
           piDate: $('edPiDate').value || S.editor.piDate,
-          status: S.editor.status,
+          status: $('edStatusSel').value || S.editor.status,
+          expectedLoad: $('edLoadDate').value || '',
           ownerPic: S.editor.ownerPic || '',
           lines: S.editor.lines,
           discountPct: S.editor.discountPct,
@@ -1249,15 +1262,20 @@ function restoreDraft(client, ed) {
   $('clientView').style.display = 'none';
   S.editor = {
     mode: ed.mode, piNumber: ed.piNumber, piDate: ed.piDate, status: ed.status,
-    ownerPic: ed.ownerPic || '',
+    expectedLoad: ed.expectedLoad || '',
+    ownerPic: ed.ownerPic || '', clientObj: client,
     lines: ed.lines || [],
     discountPct: ed.discountPct || 0, discountVal: ed.discountVal || 0, other: ed.other || 0
   };
   $('editorView').style.display = 'block';
+  $('edClient').style.display = ''; $('edClientSelect').style.display = 'none';
   $('edClient').value = client.name;
+  $('edClientCodeWrap').style.display = isAdminLevel() ? '' : 'none';
+  $('edClientCode').value = client.id || '';
   $('edPiNumber').value = ed.piNumber || '';
   $('edPiDate').value = ed.piDate || '';
-  $('edStatus').textContent = ed.status || '';
+  $('edLoadDate').value = ed.expectedLoad || '';
+  setEditorStatus(ed.status || 'targeted');
   $('tDiscountPct').value = S.editor.discountPct || '';
   $('tDiscountVal').value = S.editor.discountVal || '';
   $('tOther').value = S.editor.other || '';
@@ -1273,20 +1291,33 @@ function restoreDraft(client, ed) {
 }
 
 /* ================= Editor (form báo giá) ================= */
+/** Đổ options cho dropdown trạng thái: targeted/drafted; giữ reviewed/legacy nếu đơn đang ở status đó. */
+function setEditorStatus(status) {
+  var s = String(status || 'targeted');
+  var base = ['targeted', 'drafted'];
+  var opts = base.slice();
+  if (base.indexOf(s.toLowerCase()) < 0) opts.unshift(s); // reviewed / Sale Edited / New Created -> giữ nguyên
+  $('edStatusSel').innerHTML = opts.map(function (o) {
+    var v = (base.indexOf(o) >= 0) ? o : o; // giữ nguyên chuỗi gốc cho status đặc biệt
+    return '<option value="' + esc(o) + '"' + (o === s || o.toLowerCase() === s.toLowerCase() ? ' selected' : '') + '>' + esc(o) + '</option>';
+  }).join('');
+  $('edStatusSel').value = (base.indexOf(s.toLowerCase()) >= 0) ? s.toLowerCase() : s;
+}
+
 function openEditor(mode, piNumber, lines, existingOrder) {
-  // Sửa đơn đã nằm trong file sale (New Created/Sale Edited/reviewed) -> GIỮ status hiện tại
-  // (technician giữ reviewed; admin sửa reviewed vẫn reviewed). Sửa đơn ops -> 'Sale Edited'. Clone/New -> 'New Created'.
+  // Clone/New -> 'targeted' (sale chọn Expected Loading). Sửa đơn sale -> giữ status hiện tại. Sửa đơn ops -> 'Sale Edited'.
   var editStatus;
   if (mode === 'edit') {
     editStatus = (existingOrder && existingOrder.source === 'sale') ? existingOrder.status : 'Sale Edited';
   } else {
-    editStatus = 'New Created';
+    editStatus = 'targeted';
   }
   S.editor = {
     mode: mode,
     piNumber: piNumber,
     piDate: new Date().toISOString().slice(0, 10),
     status: editStatus,
+    expectedLoad: (mode === 'edit' && existingOrder) ? (existingOrder.realLoad || '') : '',
     // admin/technician sửa đơn của sale khác: giữ PIC gốc (server chỉ tôn trọng khi role admin/technician)
     ownerPic: mode === 'edit' && existingOrder ? (existingOrder.pic || '') : '',
     clientObj: S.currentClient, // khách của đơn đang soạn (Clone có thể đổi)
@@ -1313,7 +1344,8 @@ function openEditor(mode, piNumber, lines, existingOrder) {
   $('edClientCode').value = S.currentClient.id || '';
   $('edPiNumber').value = piNumber;
   $('edPiDate').value = S.editor.piDate;
-  $('edStatus').textContent = S.editor.status;
+  $('edLoadDate').value = S.editor.expectedLoad || '';
+  setEditorStatus(S.editor.status);
   $('tDiscountPct').value = S.editor.discountPct || '';
   $('tDiscountVal').value = S.editor.discountVal || '';
   $('tOther').value = '';
@@ -1516,6 +1548,8 @@ $('edSaveBtn').addEventListener('click', function () {
   var ed = S.editor;
   ed.piNumber = $('edPiNumber').value.trim();
   ed.piDate = $('edPiDate').value;
+  ed.status = $('edStatusSel').value || ed.status; // sale đổi targeted/drafted
+  ed.expectedLoad = $('edLoadDate').value || '';
   if (!ed.piNumber) { toast('Nhập PI Number.'); return; }
   var lines = ed.lines.filter(function (l) { return l.code && l.qty > 0; });
   if (!lines.length) { toast('Đơn chưa có dòng nào (cần Code + Qty > 0).'); return; }
@@ -1531,7 +1565,7 @@ $('edSaveBtn').addEventListener('click', function () {
     fob: Math.round(grand * 100) / 100,
     discount: ed.discountVal || 0,
     freight: ed.other || 0,
-    expectedLoad: '',
+    expectedLoad: ed.expectedLoad || '',
     lines: lines.map(function (l) {
       return { code: l.code, product: l.product, qty: l.qty, price: l.price, amount: Math.round(l.qty * l.price * 100) / 100 };
     })
@@ -2313,6 +2347,20 @@ $('reqClientCodeBtn').addEventListener('click', function () {
     toast('Đã tải ' + res.filename);
   }).catch(function (e) { toast('Lỗi form mã KH: ' + e.message); })
     .finally(function () { loading(false); });
+});
+
+/* ================= Xóa PI (đơn targeted — sale/lead/admin) ================= */
+$('deletePiBtn').addEventListener('click', function () {
+  var o = S.currentOrder;
+  if (!o) return;
+  appConfirm('Xóa hẳn PI ' + (o.piNumber || o.so) + ' (khách ' + S.currentClient.name + ')? Hành động này không hoàn tác được.', function () {
+    loading(true);
+    gs('api_deletePI', S.token, { piNumber: o.piNumber, ownerPic: o.pic || '' }).then(function () {
+      toast('Đã xóa PI ' + (o.piNumber || o.so) + '.');
+      selectClient(S.currentClient); // nạp lại danh sách đơn
+    }).catch(function (e) { toast('Lỗi xóa: ' + e.message); })
+      .finally(function () { loading(false); });
+  });
 });
 
 /* ================= Confirm PI → Operations2025 (chỉ admin) ================= */
