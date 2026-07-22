@@ -309,7 +309,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
           <table class="data-table" id="orderDetailTable">
             <thead><tr>
               <th>#</th><th>Code</th><th>Sản phẩm</th><th class="num">Qty</th>
-              <th class="num">Đơn giá</th><th class="num">Thành tiền</th><th class="num">%LN</th><th class="num">CBM</th>
+              <th class="num">Đơn giá</th><th class="num">Thành tiền</th><th class="num">%LN</th><th class="num">Item CBM</th>
               <th class="num">Marking</th><th>Ghi chú</th>
             </tr></thead>
             <tbody></tbody>
@@ -385,7 +385,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
               <th class="num">Qty</th><th class="num">Đơn giá $</th><th class="num">Thành tiền</th>
               <th class="num">Proposed $</th><th class="num">%LN</th>
               <th class="num">Qty/CT</th><th class="num">L</th><th class="num">W</th><th class="num">H</th>
-              <th class="num">CT CBM</th><th class="num">Item CBM</th>
+              <th class="num">Item CBM</th>
               <th class="num" title="Mục này có cần Marking?">Marking</th><th>Ghi chú</th><th></th>
             </tr></thead>
             <tbody></tbody>
@@ -1080,7 +1080,8 @@ function renderOrderDetailRows() {
   var tbody = $('orderDetailTable').querySelector('tbody');
   var totalLn = 0, totalValue = 0;
   tbody.innerHTML = S.currentLines.length ? S.currentLines.map(function (d, j) {
-    var cbm = d.cbm || (d.qtyCt ? (d.orderQty / d.qtyCt) * (d.l * d.w * d.h / 1e9) : 0);
+    // Item CBM (theo mục hàng): ưu tiên cột ICBM; nếu trống thì tự tính từ packing. KHÔNG dùng cột CBM (theo thùng).
+    var cbm = d.icbm || (d.qtyCt ? (d.orderQty / d.qtyCt) * (d.l * d.w * d.h / 1e9) : 0);
     var p = findProduct(d.code);
     var ln = lineLnPct(d.price, p ? p.price : 0);
     var value = d.value || d.orderQty * d.price;
@@ -1481,11 +1482,10 @@ function renderLines() {
       '<td class="num">' + fmt$(total) + '</td>' +
       '<td class="num">' + (line.proposed ? fmt$(line.proposed) : '—') + '</td>' +
       '<td class="num ' + lnCls + '">' + (ln == null ? '—' : fmtN(ln, 1) + '%') + '</td>' +
-      '<td class="num">' + (line.qtyCt || '—') + '</td>' +
+      '<td class="num"><input type="number" min="0" data-f="qtyCt" style="width:64px" value="' + (line.qtyCt || '') + '"></td>' +
       '<td class="num"><input type="number" min="0" data-f="l" style="width:64px" value="' + (line.l || '') + '"></td>' +
       '<td class="num"><input type="number" min="0" data-f="w" style="width:64px" value="' + (line.w || '') + '"></td>' +
       '<td class="num"><input type="number" min="0" data-f="h" style="width:64px" value="' + (line.h || '') + '"></td>' +
-      '<td class="num">' + (ctCbm ? fmtN(ctCbm, 3) : '—') + '</td>' +
       '<td class="num">' + (itemCbm ? fmtN(itemCbm) : '—') + '</td>' +
       '<td class="num"><input type="checkbox" data-mark="1"' + (normMarking(line.marking) === 'Y' ? ' checked' : '') + ' title="Mục này có cần Marking?"></td>' +
       '<td><input class="wide-in" data-f="note" value="' + esc(line.note || '') + '" placeholder="Ghi chú dòng…" style="min-width:120px"></td>' +
@@ -1507,7 +1507,7 @@ function renderLines() {
     tr.querySelectorAll('input[data-f]').forEach(function (inp) {
       inp.addEventListener('change', function () {
         var f = inp.getAttribute('data-f');
-        var numFields = ['qty', 'price', 'l', 'w', 'h'];
+        var numFields = ['qty', 'price', 'qtyCt', 'l', 'w', 'h'];
         line[f] = numFields.indexOf(f) >= 0 ? (parseFloat(inp.value) || 0) : inp.value;
         renderLines(); // sửa L/W/H -> CT CBM, Item CBM, tổng CBM tự tính lại
       });
