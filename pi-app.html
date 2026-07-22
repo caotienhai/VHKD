@@ -192,6 +192,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
       <span id="userInfo"></span>
       <a class="btn ghost" href="https://caotienhai.github.io/VHKD/shipment-tracking.html" target="_blank" rel="noopener" title="Xem lịch trình shipment (chỉ xem — cập nhật cần mã admin)">🚢 Shipment</a>
       <button class="btn ghost" id="refreshBtn" title="Xóa cache, tải lại dữ liệu mới nhất từ Google Sheets">⟳ Làm mới</button>
+      <button class="btn ghost" id="changePinBtn" title="Đổi mật khẩu (PIN) của bạn">🔑 Đổi mật khẩu</button>
       <button class="btn ghost" id="logoutBtn">Đăng xuất</button>
     </div>
   </header>
@@ -545,6 +546,23 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
   </div>
 </div>
 
+<!-- ========== Modal đổi mật khẩu (PIN) ========== -->
+<div class="overlay" id="pwOverlay" style="display:none">
+  <div class="modal" style="width:380px">
+    <h3>Đổi mật khẩu (PIN)</h3>
+    <div class="picker-grid" style="grid-template-columns:1fr">
+      <label>PIN hiện tại <input type="password" id="pwOld" inputmode="numeric" autocomplete="off"></label>
+      <label>PIN mới (tối thiểu 4 ký tự) <input type="password" id="pwNew" inputmode="numeric" autocomplete="off"></label>
+      <label>Nhập lại PIN mới <input type="password" id="pwNew2" inputmode="numeric" autocomplete="off"></label>
+    </div>
+    <div class="login-error" id="pwError" style="min-height:16px"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="pwCancelBtn">Hủy</button>
+      <button class="btn primary" id="pwOkBtn">Lưu</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== Modal xác nhận (thay confirm() mặc định của trình duyệt) ========== -->
 <div class="overlay" id="confirmOverlay" style="display:none">
   <div class="modal" style="width:380px">
@@ -721,6 +739,29 @@ $('refreshBtn').addEventListener('click', function () {
     .then(function () { return bootstrap(); })
     .then(function () { toast('Đã tải lại dữ liệu mới nhất.'); })
     .catch(function (e) { toast('Lỗi: ' + e.message); })
+    .finally(function () { loading(false); });
+});
+
+/* ================= Đổi mật khẩu (PIN) ================= */
+$('changePinBtn').addEventListener('click', function () {
+  $('pwOld').value = ''; $('pwNew').value = ''; $('pwNew2').value = '';
+  $('pwError').textContent = '';
+  $('pwOverlay').style.display = 'flex';
+  setTimeout(function () { $('pwOld').focus(); }, 50);
+});
+$('pwCancelBtn').addEventListener('click', function () { $('pwOverlay').style.display = 'none'; });
+$('pwOkBtn').addEventListener('click', function () {
+  var oldP = $('pwOld').value.trim(), newP = $('pwNew').value.trim(), new2 = $('pwNew2').value.trim();
+  $('pwError').textContent = '';
+  if (!oldP || !newP) { $('pwError').textContent = 'Nhập đủ PIN hiện tại và PIN mới.'; return; }
+  if (newP.length < 4) { $('pwError').textContent = 'PIN mới phải có ít nhất 4 ký tự.'; return; }
+  if (newP !== new2) { $('pwError').textContent = 'PIN mới nhập lại không khớp.'; return; }
+  if (newP === oldP) { $('pwError').textContent = 'PIN mới phải khác PIN hiện tại.'; return; }
+  loading(true);
+  gs('api_changePin', S.token, oldP, newP).then(function () {
+    $('pwOverlay').style.display = 'none';
+    toast('Đã đổi mật khẩu.');
+  }).catch(function (e) { $('pwError').textContent = e.message; })
     .finally(function () { loading(false); });
 });
 
