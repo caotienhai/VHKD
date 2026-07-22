@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kế hoạch chuyển Export Ops Hub lên Google Workspace công ty</title>
+<style>
+  :root{
+    --ink:#17211d; --soft:#4b5852; --faint:#84918a;
+    --line:#d8e0da; --line-soft:#e9eee9;
+    --accent:#0e6e64; --accent-soft:#e6f1ed; --accent-strong:#0a5049;
+    --warn:#a9631b; --warn-soft:#f7ecdb; --danger:#b3432b; --danger-soft:#f6e3de;
+    --panel:#ffffff; --bg:#ffffff;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  body{margin:0; color:var(--ink); background:var(--bg);
+    font-family:"Be Vietnam Pro","Segoe UI",system-ui,-apple-system,sans-serif;
+    font-size:13.2px; line-height:1.55;}
+  .doc{max-width:820px; margin:0 auto; padding:0 34px}
+
+  /* cover */
+  .cover{padding:46px 0 26px; border-bottom:3px solid var(--accent); margin-bottom:30px}
+  .kicker{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 12px}
+  h1{font-size:30px; line-height:1.12; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+  .cover .sub{font-size:15px; color:var(--soft); margin:0 0 18px; max-width:60ch}
+  .meta{display:flex; flex-wrap:wrap; gap:6px 26px; font-size:12px; color:var(--faint)}
+  .meta b{color:var(--ink); font-weight:600}
+
+  h2{font-size:18px; font-weight:750; margin:26px 0 8px; color:var(--ink); display:flex; gap:10px; align-items:baseline}
+  h2 .n{color:var(--accent); font-variant-numeric:tabular-nums; font-size:15px}
+  h3{font-size:13.5px; font-weight:700; margin:16px 0 5px}
+  p{margin:0 0 9px}
+  ul,ol{margin:0 0 9px; padding-left:20px} li{margin:4px 0}
+  b,strong{font-weight:650}
+  section{page-break-inside:avoid}
+
+  table{width:100%; border-collapse:collapse; font-size:12.3px; margin:10px 0}
+  th,td{text-align:left; padding:7px 10px; border:1px solid var(--line); vertical-align:top}
+  th{background:var(--accent-soft); color:var(--accent-strong); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.03em}
+  td:first-child{font-weight:600; white-space:nowrap}
+
+  .arch{display:flex; gap:14px; align-items:stretch; margin:12px 0}
+  .arch .box{flex:1; border:1px solid var(--line); border-radius:10px; padding:14px 16px}
+  .arch .box.before{background:#faf7f3}
+  .arch .box.after{background:var(--accent-soft); border-color:transparent}
+  .arch .box h4{margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.05em}
+  .arch .before h4{color:var(--warn)} .arch .after h4{color:var(--accent-strong)}
+  .arch .box ul{padding-left:16px; margin:0; font-size:12px} .arch .box li{margin:3px 0}
+  .arch .arrow{display:flex; align-items:center; font-size:22px; color:var(--accent); font-weight:700}
+
+  .callout{border-left:3px solid var(--accent); background:var(--accent-soft); padding:10px 14px; border-radius:0 8px 8px 0; margin:12px 0; font-size:12.6px}
+  .callout.warn{border-color:var(--warn); background:var(--warn-soft)}
+  .callout.warn b{color:var(--warn)}
+  .callout b{color:var(--accent-strong)}
+
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:12px 0}
+  ol.steps>li{counter-increment:s; position:relative; padding:2px 0 10px 40px}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:0; width:26px; height:26px; border-radius:50%;
+    background:var(--accent); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center}
+  ol.steps>li:not(:last-child)::after{content:""; position:absolute; left:12.5px; top:28px; bottom:0; width:1px; background:var(--line)}
+
+  .check{list-style:none; padding:0; margin:10px 0}
+  .check li{position:relative; padding:5px 0 5px 26px; border-bottom:1px solid var(--line-soft); font-size:12.6px}
+  .check li::before{content:""; position:absolute; left:0; top:7px; width:13px; height:13px; border:1.5px solid var(--accent); border-radius:3px}
+
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .who{border:1px solid var(--line); border-radius:10px; padding:12px 15px}
+  .who h4{margin:0 0 6px; font-size:12.5px; color:var(--accent-strong)}
+  .who ul{padding-left:16px; margin:0; font-size:12.3px}
+
+  footer{margin-top:30px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--faint); text-align:center}
+  @page{margin:14mm 0}
+  @media print{ .doc{max-width:none; padding:0 16mm} h2{margin-top:20px} }
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="cover">
+    <p class="kicker">Đề xuất hạ tầng · Phòng Vận hành Kinh doanh — Karofi</p>
+    <h1>Kế hoạch chuyển Export Ops Hub<br>lên Google Workspace công ty</h1>
+    <p class="sub">Đưa cơ sở dữ liệu và back-end của ứng dụng báo giá xuất khẩu (PI) từ tài khoản cá nhân về hạ tầng Google Workspace do công ty sở hữu, kèm đăng nhập một lần (SSO) bằng tài khoản công ty.</p>
+    <div class="meta">
+      <span>Ứng dụng: <b>Export Ops Hub (PI Quote App)</b></span>
+      <span>Phương án: <b>Google Workspace công ty</b></span>
+      <span>Bản: <b>Kế hoạch trình duyệt</b></span>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="n">1.</span> Bối cảnh &amp; mục tiêu</h2>
+    <p>Export Ops Hub hiện đã vận hành: sale lập báo giá PI, kỹ thuật kiểm tra, quản lý xác nhận đơn vào hệ theo dõi — chạy trên nền Google (Apps Script + Google Sheets). Tuy nhiên toàn bộ đang <b>đặt trên một tài khoản Gmail cá nhân</b>, tạo rủi ro vận hành và hạn chế về bảo mật đăng nhập.</p>
+    <p><b>Mục tiêu:</b> chuyển dữ liệu + back-end sang Google Workspace của công ty để (1) công ty sở hữu tài sản, không phụ thuộc cá nhân; (2) đăng nhập bằng chính tài khoản công ty (bỏ mã PIN); (3) IT quản trị, sao lưu, phân quyền tập trung.</p>
+    <div class="callout"><b>Điểm thuận lợi:</b> vì app đã chạy trên nền Google, đây là phương án ít phải viết lại nhất — chủ yếu là chuyển quyền sở hữu và nâng cấp cơ chế đăng nhập. Phần lớn mã nguồn giữ nguyên.</div>
+  </section>
+
+  <section>
+    <h2><span class="n">2.</span> Điều kiện tiên quyết (cần IT xác nhận)</h2>
+    <ol>
+      <li>Công ty có <b>Google Workspace</b> (tên miền, ví dụ <b>@karofi.vn</b>) và cấp được <b>tài khoản Google</b> cho tất cả người dùng app (sale, trưởng nhóm, kỹ thuật, admin).</li>
+      <li>Có <b>Shared Drive</b> (Drive dùng chung) do tổ chức sở hữu để chứa dữ liệu &amp; mã nguồn.</li>
+      <li>Chỉ định <b>tài khoản quản trị ứng dụng</b> (chủ sở hữu deployment) và người tiếp quản lâu dài.</li>
+    </ol>
+    <div class="callout warn"><b>Lưu ý quan trọng:</b> nhân viên đang dùng Microsoft 365 cho email. Phương án này yêu cầu mỗi người dùng app <b>có thêm tài khoản Google Workspace</b> của công ty. Cần chốt việc cấp tài khoản/chi phí license trước khi triển khai.</div>
+  </section>
+
+  <section>
+    <h2><span class="n">3.</span> Kiến trúc: trước → sau</h2>
+    <div class="arch">
+      <div class="box before">
+        <h4>Hiện tại</h4>
+        <ul>
+          <li>File dữ liệu &amp; template thuộc <b>Gmail cá nhân</b></li>
+          <li>Apps Script chạy dưới tài khoản cá nhân</li>
+          <li>Đăng nhập bằng <b>Tên + PIN</b> (lưu trong Sheet)</li>
+          <li>Front-end tĩnh trên GitHub Pages</li>
+        </ul>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box after">
+        <h4>Sau khi chuyển</h4>
+        <ul>
+          <li>Toàn bộ file trong <b>Shared Drive công ty</b></li>
+          <li>Apps Script owned by tài khoản công ty</li>
+          <li>Đăng nhập <b>SSO Google công ty</b> (bỏ PIN)</li>
+          <li>Front-end giữ nguyên, chỉ đổi URL API</li>
+        </ul>
+      </div>
+    </div>
+    <table>
+      <tr><th>Thành phần</th><th>Hiện tại</th><th>Sau khi chuyển</th></tr>
+      <tr><td>Cơ sở dữ liệu</td><td>Google Sheets (tài khoản cá nhân)</td><td>Google Sheets trong Shared Drive công ty</td></tr>
+      <tr><td>Back-end</td><td>Apps Script (cá nhân)</td><td>Apps Script (tài khoản/Shared Drive công ty)</td></tr>
+      <tr><td>Đăng nhập</td><td>Tên + PIN (plaintext)</td><td>SSO tài khoản Google công ty (theo email)</td></tr>
+      <tr><td>Phân quyền</td><td>Cột Role + PIN</td><td>Email nhân viên → Role (bỏ PIN)</td></tr>
+      <tr><td>Xuất Excel/PDF</td><td>Cơ chế export của Google Sheets</td><td>Giữ nguyên (ổn định hơn dưới Workspace)</td></tr>
+      <tr><td>Front-end</td><td>GitHub Pages</td><td>Giữ GitHub Pages hoặc Google Sites nội bộ</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="n">4.</span> Thay đổi cốt lõi: SSO thay cho Tên + PIN</h2>
+    <p>Đây là nâng cấp quan trọng nhất. Khi web app được deploy trong Workspace với quyền “chỉ người trong tổ chức”, hệ thống <b>nhận diện chính xác người đăng nhập qua email tài khoản Google công ty</b> — điều tài khoản Gmail cá nhân không làm được (nên trước đây phải dùng PIN).</p>
+    <ul>
+      <li>Bảng <b>Users</b> đổi từ <code>Name | PIN | Role | …</code> sang <code>Email | Name | Role | …</code>.</li>
+      <li>Đăng nhập trở nên <b>tự động</b>: nhân viên đã đăng nhập Google công ty là vào thẳng, không cần nhập gì.</li>
+      <li>Bỏ hoàn toàn việc quản lý/đổi/quên PIN; nghỉ việc → IT khóa tài khoản là mất quyền ngay.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">5.</span> Lộ trình 6 bước</h2>
+    <ol class="steps">
+      <li><b>Chuẩn bị (IT):</b> tạo Shared Drive “Export Ops Hub”; cấp tài khoản Google công ty cho người dùng; chọn tài khoản chủ sở hữu ứng dụng.</li>
+      <li><b>Chuyển dữ liệu:</b> đưa toàn bộ Google Sheets (dữ liệu sản phẩm/giá/khách, đơn hàng, file báo giá dùng chung, các biểu mẫu PI/R&amp;D/mã KH) vào Shared Drive — tổ chức sở hữu.</li>
+      <li><b>Chuyển mã nguồn:</b> tạo lại project Apps Script dưới tài khoản công ty, giữ nguyên logic; cập nhật ID các file dữ liệu.</li>
+      <li><b>Nâng cấp đăng nhập:</b> chuyển sang SSO theo email, cập nhật bảng Users; deploy web app giới hạn “trong tổ chức”; front-end bỏ màn hình nhập PIN.</li>
+      <li><b>Chạy song song &amp; đối chiếu:</b> trỏ ứng dụng sang back-end mới, giữ bản cũ vài ngày để so sánh; chạy lại các bước cài đặt biểu mẫu.</li>
+      <li><b>Cắt chuyển &amp; quản trị:</b> phân quyền Shared Drive, bật sao lưu định kỳ, gỡ bản cũ.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2><span class="n">6.</span> Lợi ích</h2>
+    <ul>
+      <li><b>Hết rủi ro tài khoản cá nhân</b> — dữ liệu &amp; ứng dụng thuộc về công ty (đảm bảo liên tục vận hành).</li>
+      <li><b>Đăng nhập an toàn (SSO)</b> — bỏ PIN, quản trị theo tài khoản/nhóm công ty.</li>
+      <li><b>Hạn mức xử lý cao hơn</b> — Workspace cho phép chạy/ xuất file nhiều hơn tài khoản cá nhân.</li>
+      <li><b>Trải nghiệm gọn hơn</b> — bỏ được cảnh báo của Google cho người dùng nội bộ; vào thẳng bằng tài khoản công ty.</li>
+      <li><b>Giữ gần như toàn bộ mã nguồn</b> — chi phí chuyển đổi thấp.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">7.</span> Rủi ro &amp; lưu ý</h2>
+    <ul>
+      <li><b>Hai hệ tài khoản song song:</b> email vẫn dùng Microsoft 365, app dùng Google — cân nhắc chi phí license và trải nghiệm đăng nhập.</li>
+      <li><b>Nguồn dữ liệu dùng chung:</b> nếu bộ phận khác còn dùng bản trên tài khoản cá nhân, cần thống nhất chuyển hẳn để tránh hai bản lệch nhau.</li>
+      <li><b>Chủ sở hữu lâu dài:</b> cần giao rõ một người/nhóm quản trị Shared Drive + project.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">8.</span> Phân công &amp; ước lượng</h2>
+    <div class="split">
+      <div class="who">
+        <h4>Phần kỹ thuật ứng dụng (~1–1.5 ngày làm + kiểm thử)</h4>
+        <ul>
+          <li>Chuyển đăng nhập sang SSO theo email; đổi bảng Users</li>
+          <li>Cập nhật ID các file dữ liệu &amp; biểu mẫu</li>
+          <li>Bỏ màn hình PIN ở front-end, trỏ URL API mới</li>
+          <li>Chạy lại cài đặt biểu mẫu, kiểm thử end-to-end</li>
+        </ul>
+      </div>
+      <div class="who">
+        <h4>Phần IT / công ty (tùy tốc độ)</h4>
+        <ul>
+          <li>Tạo Shared Drive + cấp tài khoản Google người dùng</li>
+          <li>Chỉ định tài khoản chủ sở hữu ứng dụng</li>
+          <li>Chuyển quyền sở hữu file; phân quyền truy cập</li>
+          <li>Thiết lập sao lưu &amp; chính sách quản trị</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">9.</span> Checklist bàn giao cho IT</h2>
+    <ul class="check">
+      <li>Xác nhận công ty có Google Workspace + tên miền dùng cho app</li>
+      <li>Lập danh sách người dùng app và cấp tài khoản Google tương ứng</li>
+      <li>Tạo Shared Drive “Export Ops Hub” và tài khoản chủ sở hữu ứng dụng</li>
+      <li>Chuyển quyền sở hữu toàn bộ file dữ liệu &amp; biểu mẫu vào Shared Drive</li>
+      <li>Deploy web app giới hạn trong tổ chức (SSO nội bộ)</li>
+      <li>Bật sao lưu định kỳ và phân quyền truy cập theo vai trò</li>
+      <li>Chạy song song đối chiếu, sau đó cắt chuyển và gỡ bản cũ</li>
+    </ul>
+  </section>
+
+  <footer>
+    Export Ops Hub · Phòng Vận hành Kinh doanh — Công ty CP Tập đoàn Karofi · Kế hoạch chuyển hạ tầng (2026)
+  </footer>
+</div>
+</body>
+</html>
