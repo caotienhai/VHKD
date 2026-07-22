@@ -310,6 +310,7 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
             <thead><tr>
               <th>#</th><th>Code</th><th>Sản phẩm</th><th class="num">Qty</th>
               <th class="num">Đơn giá</th><th class="num">Thành tiền</th><th class="num">%LN</th><th class="num">CBM</th>
+              <th class="num">Marking</th><th>Ghi chú</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -343,6 +344,9 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
                 <option value="targeted">targeted</option>
                 <option value="drafted">drafted</option>
               </select>
+            </label>
+            <label style="flex:1 1 260px">Ghi chú đơn
+              <input type="text" id="edOrderNote" placeholder="Ghi chú chung cho cả đơn…">
             </label>
           </div>
           <div class="editor-actions">
@@ -381,7 +385,8 @@ h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
               <th class="num">Qty</th><th class="num">Đơn giá $</th><th class="num">Thành tiền</th>
               <th class="num">Proposed $</th><th class="num">%LN</th>
               <th class="num">Qty/CT</th><th class="num">L</th><th class="num">W</th><th class="num">H</th>
-              <th class="num">CT CBM</th><th class="num">Item CBM</th><th></th>
+              <th class="num">CT CBM</th><th class="num">Item CBM</th>
+              <th class="num" title="Mục này có cần Marking?">Marking</th><th>Ghi chú</th><th></th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -1050,9 +1055,10 @@ function selectOrder(i) {
     '<span>Load Date <b>' + esc(o.realLoad || '—') + '</b></span>' +
     '<span>FOB: <b>' + fmt$(o.fob) + '</b></span>' +
     '<span>%LN tổng: <b id="ordLnTotal">—</b></span>' +
-    '<span>Status: <b>' + esc(o.status || '—') + '</b></span>';
+    '<span>Status: <b>' + esc(o.status || '—') + '</b></span>' +
+    (o.note ? '<span style="flex-basis:100%">📝 Ghi chú: <b>' + esc(o.note) + '</b></span>' : '');
   var tbody = $('orderDetailTable').querySelector('tbody');
-  tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted)">Đang tải chi tiết…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="color:var(--muted)">Đang tải chi tiết…</td></tr>';
   loading(true);
   gs('api_orderDetails', S.token, {
     source: o.source, so: o.so, piNumber: o.piNumber, clientName: S.currentClient.name, pic: o.pic
@@ -1085,8 +1091,10 @@ function renderOrderDetailRows() {
       '<td>' + esc(d.product) + '</td><td class="num">' + fmtN(d.orderQty, 0) + '</td>' +
       '<td class="num">' + fmt$(d.price) + '</td><td class="num">' + fmt$(value) + '</td>' +
       '<td class="num ' + lnCls + '">' + (ln == null ? '—' : fmtN(ln, 1) + '%') + '</td>' +
-      '<td class="num">' + fmtN(cbm) + '</td></tr>';
-  }).join('') : '<tr><td colspan="8" style="color:var(--muted)">Không có dòng chi tiết.</td></tr>';
+      '<td class="num">' + fmtN(cbm) + '</td>' +
+      '<td class="num">' + (normMarking(d.marking) === 'Y' ? '✔' : (normMarking(d.marking) === 'N' ? '—' : '')) + '</td>' +
+      '<td>' + esc(d.note || '') + '</td></tr>';
+  }).join('') : '<tr><td colspan="10" style="color:var(--muted)">Không có dòng chi tiết.</td></tr>';
   var el = $('ordLnTotal');
   if (el) el.textContent = totalValue > 0 && S.products ? fmtN(totalLn / totalValue * 100, 1) + '%' : '—';
 }
@@ -1112,15 +1120,24 @@ $('createNewBtn').addEventListener('click', function () {
 
 function linesToEditor(details) {
   return details.map(function (d) {
-    return makeLine(d.code, d.product, d.brand, d.orderQty, d.price, d.qtyCt, d.l, d.w, d.h);
+    return makeLine(d.code, d.product, d.brand, d.orderQty, d.price, d.qtyCt, d.l, d.w, d.h, d.note, d.marking);
   });
 }
 
-function makeLine(code, product, brand, qty, price, qtyCt, l, w, h) {
+/** Chuẩn hóa Marking về 'Y' / 'N' / '' (rỗng = chưa đánh dấu). */
+function normMarking(v) {
+  var s = String(v == null ? '' : v).trim().toUpperCase();
+  return s.charAt(0) === 'Y' ? 'Y' : (s.charAt(0) === 'N' ? 'N' : '');
+}
+
+function makeLine(code, product, brand, qty, price, qtyCt, l, w, h, note, marking) {
   var line = {
     code: code || '', product: product || '', brand: brand || '',
     qty: Number(qty) || 0, price: Number(price) || 0,
     qtyCt: Number(qtyCt) || 0, l: Number(l) || 0, w: Number(w) || 0, h: Number(h) || 0,
+    note: note || '',
+    // dòng mới (không truyền marking) mặc định 'Y' (mã xuất khẩu thường cần marking); dòng có sẵn giữ giá trị đã lưu
+    marking: (marking === undefined) ? 'Y' : normMarking(marking),
     proposed: 0, isNew: false
   };
   enrichFromCatalog(line);
@@ -1216,6 +1233,7 @@ function saveDraft() {
           piDate: $('edPiDate').value || S.editor.piDate,
           status: $('edStatusSel').value || S.editor.status,
           expectedLoad: $('edLoadDate').value || '',
+          note: $('edOrderNote').value || '',
           ownerPic: S.editor.ownerPic || '',
           lines: S.editor.lines,
           discountPct: S.editor.discountPct,
@@ -1310,6 +1328,7 @@ function restoreDraft(client, ed) {
     expectedLoad: ed.expectedLoad || '',
     ownerPic: ed.ownerPic || '', clientObj: client,
     lines: ed.lines || [],
+    note: ed.note || '',
     discountPct: ed.discountPct || 0, discountVal: ed.discountVal || 0, other: ed.other || 0
   };
   $('editorView').style.display = 'block';
@@ -1320,6 +1339,7 @@ function restoreDraft(client, ed) {
   $('edPiNumber').value = ed.piNumber || '';
   $('edPiDate').value = ed.piDate || '';
   $('edLoadDate').value = ed.expectedLoad || '';
+  $('edOrderNote').value = ed.note || '';
   setEditorStatus(ed.status || 'targeted');
   $('tDiscountPct').value = S.editor.discountPct || '';
   $('tDiscountVal').value = S.editor.discountVal || '';
@@ -1367,6 +1387,8 @@ function openEditor(mode, piNumber, lines, existingOrder) {
     ownerPic: mode === 'edit' && existingOrder ? (existingOrder.pic || '') : '',
     clientObj: S.currentClient, // khách của đơn đang soạn (Clone có thể đổi)
     lines: lines,
+    // Ghi chú chung của đơn: chỉ giữ khi Sửa đơn có sẵn; Clone/New bắt đầu trống
+    note: (mode === 'edit' && existingOrder) ? (existingOrder.note || '') : '',
     discountPct: existingOrder ? 0 : 0,
     discountVal: existingOrder ? (existingOrder.discount || 0) : 0,
     other: 0
@@ -1390,6 +1412,7 @@ function openEditor(mode, piNumber, lines, existingOrder) {
   $('edPiNumber').value = piNumber;
   $('edPiDate').value = S.editor.piDate;
   $('edLoadDate').value = S.editor.expectedLoad || '';
+  $('edOrderNote').value = S.editor.note || '';
   setEditorStatus(S.editor.status);
   $('tDiscountPct').value = S.editor.discountPct || '';
   $('tDiscountVal').value = S.editor.discountVal || '';
@@ -1464,8 +1487,11 @@ function renderLines() {
       '<td class="num"><input type="number" min="0" data-f="h" style="width:64px" value="' + (line.h || '') + '"></td>' +
       '<td class="num">' + (ctCbm ? fmtN(ctCbm, 3) : '—') + '</td>' +
       '<td class="num">' + (itemCbm ? fmtN(itemCbm) : '—') + '</td>' +
+      '<td class="num"><input type="checkbox" data-mark="1"' + (normMarking(line.marking) === 'Y' ? ' checked' : '') + ' title="Mục này có cần Marking?"></td>' +
+      '<td><input class="wide-in" data-f="note" value="' + esc(line.note || '') + '" placeholder="Ghi chú dòng…" style="min-width:120px"></td>' +
       '<td><button class="btn small danger" data-del="1" title="Xóa dòng">✕</button></td>';
     tr.querySelector('[data-sel]').addEventListener('change', function () { line._sel = this.checked; });
+    tr.querySelector('[data-mark]').addEventListener('change', function () { line.marking = this.checked ? 'Y' : 'N'; saveDraft(); });
     // click = chọn lại sản phẩm; double-click mã bắt đầu bằng 1 (máy) = View BOM.
     // Delay nhẹ single-click để phân biệt với double-click.
     var chip = tr.querySelector('.code-chip');
@@ -1556,6 +1582,7 @@ $('tOther').addEventListener('change', function () {
 });
 $('edPiNumber').addEventListener('change', saveDraft);
 $('edPiDate').addEventListener('change', saveDraft);
+$('edOrderNote').addEventListener('change', saveDraft);
 // Clone: đổi khách cho đơn mới -> cập nhật clientObj, gợi ý lại số PI + mã KH theo khách mới
 $('edClientSelect').addEventListener('change', function () {
   var name = this.value;
@@ -1595,6 +1622,7 @@ $('edSaveBtn').addEventListener('click', function () {
   ed.piDate = $('edPiDate').value;
   ed.status = $('edStatusSel').value || ed.status; // sale đổi targeted/drafted
   ed.expectedLoad = $('edLoadDate').value || '';
+  ed.note = $('edOrderNote').value || '';
   if (!ed.piNumber) { toast('Nhập PI Number.'); return; }
   var lines = ed.lines.filter(function (l) { return l.code && l.qty > 0; });
   if (!lines.length) { toast('Đơn chưa có dòng nào (cần Code + Qty > 0).'); return; }
@@ -1611,8 +1639,10 @@ $('edSaveBtn').addEventListener('click', function () {
     discount: ed.discountVal || 0,
     freight: ed.other || 0,
     expectedLoad: ed.expectedLoad || '',
+    note: ed.note || '', // ghi chú chung của đơn
     lines: lines.map(function (l) {
-      return { code: l.code, product: l.product, qty: l.qty, price: l.price, amount: Math.round(l.qty * l.price * 100) / 100 };
+      return { code: l.code, product: l.product, qty: l.qty, price: l.price, amount: Math.round(l.qty * l.price * 100) / 100,
+        note: l.note || '', marking: normMarking(l.marking) };
     })
   };
   loading(true);
